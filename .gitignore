@@ -1,0 +1,12 @@
+# local song library, songs stay on each person's machine
+songs/
+*.wav
+*.mp3
+*.flac
+*.aiff
+*.ogg
+*.m4a
+
+# build output
+out/
+build/
