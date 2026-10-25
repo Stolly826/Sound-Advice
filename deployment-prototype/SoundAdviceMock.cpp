@@ -1,14 +1,101 @@
-﻿
+#define NOMINMAX
 #include <windows.h>
 #include <commdlg.h>
-#include <mmsystem.h>
-#include <string>
+#include <juce_audio_formats/juce_audio_formats.h>
+#include <juce_audio_devices/juce_audio_devices.h>
+#include <juce_events/juce_events.h>
+#include <memory>
 
-#pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "comdlg32.lib")
+//updated commands with help of claude code btw im not goated like that
+//JUCE audio engine this is replacing PlaySoundW so we can play WAV and MP3 files
+class AudioEngine
+{
+public:
+    AudioEngine()
+    {
+        formats.registerBasicFormats(); //tells JUCE which audio formats it can open
 
+        error = deviceManager.initialiseWithDefaultDevices(0, 2); //connects to the default speakers
+        if (error.isEmpty())
+        {
+            player.setSource(&transport); //connects the playback controls to the audio output
+            deviceManager.addAudioCallback(&player);
+        }
+    }
+
+    ~AudioEngine()
+    {
+        deviceManager.removeAudioCallback(&player);
+        player.setSource(nullptr);
+        transport.stop();
+        transport.setSource(nullptr);
+        readerSource.reset();
+        deviceManager.closeAudioDevice();
+    }
+
+    bool isReady() const
+    {
+        return error.isEmpty();
+    }
+
+    const juce::String& getError() const
+    {
+        return error;
+    }
+
+    bool loadFile(const wchar_t* path)
+    {
+        //JUCE reads the audio file instead of using the old Windows PlaySoundW function
+        std::unique_ptr<juce::AudioFormatReader> reader(
+            formats.createReaderFor(juce::File(juce::String(path)))
+        );
+
+        if (!reader)
+            return false;
+
+        double sampleRate = reader->sampleRate;
+
+        transport.stop();
+        transport.setSource(nullptr);
+
+        readerSource = std::make_unique<juce::AudioFormatReaderSource>(
+            reader.release(), true
+        );
+
+        transport.setSource(readerSource.get(), 0, nullptr, sampleRate);
+        return true;
+    }
+
+    bool play()
+    {
+        if (!readerSource)
+            return false;
+
+        if (transport.hasStreamFinished())
+            transport.setPosition(0.0);
+
+        transport.start(); //starts playing the selected song
+        return true;
+    }
+
+    void stop()
+    {
+        transport.stop(); //stops playback
+        transport.setPosition(0.0); //moves the song back to the beginning
+    }
+
+private:
+    juce::AudioFormatManager formats;
+    std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
+    juce::AudioTransportSource transport;
+    juce::AudioSourcePlayer player;
+    juce::AudioDeviceManager deviceManager;
+    juce::String error;
+};
+
+AudioEngine* audio = nullptr;
 HWND fileLabel;
-std::wstring selectedFile;
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -47,33 +134,43 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             ofn.hwndOwner = hwnd;
             ofn.lpstrFile = filename;
             ofn.nMaxFile = MAX_PATH;
-            ofn.lpstrFilter = L"WAV Files\0*.wav\0All Files\0*.*\0";
+            ofn.lpstrFilter =
+                L"Audio Files\0*.wav;*.mp3\0"
+                L"WAV Files\0*.wav\0"
+                L"MP3 Files\0*.mp3\0";
             ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
 
             if (GetOpenFileNameW(&ofn))
             {
-                selectedFile = filename;
-                SetWindowTextW(fileLabel, selectedFile.c_str());
+                if (audio->loadFile(filename)) //loading the WAV or MP3 file
+                {
+                    SetWindowTextW(fileLabel, filename);
+                }
+                else
+                {
+                    MessageBoxW(hwnd, L"Unable to load this audio file.",
+                        L"SoundAdvice", MB_OK | MB_ICONERROR);
+                }
             }
             return 0;
         }
 
         case 2:
-            if (!selectedFile.empty())
+            if (!audio->play()) //using JUCE to handle play and stop instead of PlaySoundW
             {
-                PlaySoundW(selectedFile.c_str(), nullptr,
-                    SND_FILENAME | SND_ASYNC);
+                MessageBoxW(hwnd, L"Upload an audio file first.",
+                    L"SoundAdvice", MB_OK);
             }
             return 0;
 
         case 3:
-            PlaySoundW(nullptr, nullptr, 0);
+            audio->stop(); //stop
             return 0;
         }
         break;
 
     case WM_DESTROY:
-        PlaySoundW(nullptr, nullptr, 0);
+        audio->stop();
         PostQuitMessage(0);
         return 0;
     }
@@ -83,6 +180,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 int main()
 {
+    juce::ScopedJuceInitialiser_GUI juceInitialiser; //initializes JUCE for this application
+    AudioEngine engine;
+
+    if (!engine.isReady())
+    {
+        MessageBoxW(nullptr, engine.getError().toWideCharPointer(),
+            L"Audio initialization failed", MB_OK | MB_ICONERROR);
+        return 1;
+    }
+    audio = &engine;
+
     HINSTANCE instance = GetModuleHandleW(nullptr);
 
     WNDCLASSW wc = {}; //empty window class config 
@@ -92,7 +200,7 @@ int main()
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1); //set baackground bush
 
     if (!RegisterClassW(&wc))
-        return 1; 
+        return 1;
 
     HWND hwnd = CreateWindowExW(
         0, wc.lpszClassName,
@@ -100,21 +208,21 @@ int main()
         WS_OVERLAPPEDWINDOW, //gives the standard window features of a title bar, allowing you to resize and minimize/maximize buttons 
         CW_USEDEFAULT, CW_USEDEFAULT, //starting position when the window opens
         900, 600, //height and width
-        nullptr, nullptr, instance, nullptr 
+        nullptr, nullptr, instance, nullptr
     );
 
     if (!hwnd) //checking if creating the window succeeded
-        return 1; 
+        return 1;
 
     ShowWindow(hwnd, SW_SHOW);
 
-    MSG msg = {}; //message loop, created variable msg and then waits for windows to send a msg then stores it in msg
-    while (GetMessageW(&msg, nullptr, 0, 0) > 0) 
+    MSG msg = {}; //message loop created variable msg and then waits for windows to send a msg then stores it in msg
+    while (GetMessageW(&msg, nullptr, 0, 0) > 0)
     {
         TranslateMessage(&msg); //process keyboard inputs 
         DispatchMessageW(&msg); //sends keyboard input to the write spot
     }
 
+    audio = nullptr;
     return 0;
 }
-
