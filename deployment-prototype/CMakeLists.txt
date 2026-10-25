@@ -1,21 +1,36 @@
-﻿# CMakeList.txt : CMake project for SoundAdviceMock, include source and define
-# project specific logic here.
-#
-cmake_minimum_required (VERSION 3.10)
 
-# Enable Hot Reload for MSVC compilers if supported.
-if (POLICY CMP0141)
-  cmake_policy(SET CMP0141 NEW)
-  set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
-endif()
+cmake_minimum_required(VERSION 3.22)
 
-project ("SoundAdviceMock")
+project(SoundAdviceMock LANGUAGES C CXX)
 
-# Add source to this project's executable.
-add_executable (SoundAdviceMock "SoundAdviceMock.cpp" "SoundAdviceMock.h")
+#downloading JUCE
+include(FetchContent)
+FetchContent_Declare(
+    JUCE
+    GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+    GIT_TAG 9.0.4
+    GIT_SHALLOW TRUE
+)
 
-if (CMAKE_VERSION VERSION_GREATER 3.12)
-  set_property(TARGET SoundAdviceMock PROPERTY CXX_STANDARD 20)
-endif()
+FetchContent_MakeAvailable(JUCE)
 
-# TODO: Add tests and install targets if needed.
+#building soundadvice
+add_executable(SoundAdviceMock
+    SoundAdviceMock.cpp
+    SoundAdviceMock.h
+)
+
+#setting config rules for C++ code to be compatible w JUCE (looked this up)
+target_compile_features(SoundAdviceMock PRIVATE cxx_std_17)
+
+target_compile_definitions(SoundAdviceMock PRIVATE
+    JUCE_USE_CURL=0
+    JUCE_USE_MP3AUDIOFORMAT=1
+)
+
+#connecting JUCE's audio lib
+target_link_libraries(SoundAdviceMock PRIVATE
+    juce::juce_audio_formats
+    juce::juce_audio_devices
+    comdlg32
+)
