@@ -5,6 +5,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_events/juce_events.h>
 #include <memory>
+#include "SongData.h"
 
 #pragma comment(lib, "comdlg32.lib")
 //updated commands with help of claude code btw im not goated like that
@@ -67,6 +68,11 @@ public:
         return true;
     }
 
+    juce::AudioFormatManager& getFormats()
+    {
+        return formats;
+    }
+
     bool play()
     {
         if (!readerSource)
@@ -95,7 +101,9 @@ private:
 };
 
 AudioEngine* audio = nullptr;
+SongLibrary* library = nullptr;
 HWND fileLabel;
+HWND detailsLabel;
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -121,6 +129,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             WS_VISIBLE | WS_CHILD,
             30, 150, 700, 30,
             hwnd, nullptr, nullptr, nullptr);
+
+        detailsLabel = CreateWindowW(L"STATIC", L"",
+            WS_VISIBLE | WS_CHILD,
+            30, 190, 700, 200, //tall enough for one line per song detail
+            hwnd, nullptr, nullptr, nullptr);
         return 0;
 
     case WM_COMMAND: //used ai for this part to write me a windowsapi command function
@@ -145,6 +158,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 if (audio->loadFile(filename)) //loading the WAV or MP3 file
                 {
                     SetWindowTextW(fileLabel, filename);
+
+                    //reading the whole song for bpm and volume can take a second so show the loading cursor
+                    HCURSOR oldCursor = SetCursor(LoadCursorW(nullptr, IDC_WAIT));
+                    SongInfo song = SongData::readSong(audio->getFormats(), juce::File(juce::String(filename)));
+                    SetCursor(oldCursor);
+
+                    juce::String details = song.describe();
+                    if (!library->save(song)) //stores the details in library.json
+                        details += "\n\n(could not save to " + library->getFile().getFullPathName() + ")";
+                    SetWindowTextW(detailsLabel, details.toWideCharPointer());
                 }
                 else
                 {
@@ -191,6 +214,9 @@ int main()
     }
     audio = &engine;
 
+    SongLibrary songLibrary; //loads library.json from previous runs
+    library = &songLibrary;
+
     HINSTANCE instance = GetModuleHandleW(nullptr);
 
     WNDCLASSW wc = {}; //empty window class config 
@@ -224,5 +250,6 @@ int main()
     }
 
     audio = nullptr;
+    library = nullptr;
     return 0;
 }
