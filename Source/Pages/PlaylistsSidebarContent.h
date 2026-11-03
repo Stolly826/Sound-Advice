@@ -1,0 +1,32 @@
+#pragma once
+
+#include <juce_gui_basics/juce_gui_basics.h>
+#include "Playlist.h"
+
+// Renders the top N playlists in the sidebar, filling ~80% of its height.
+class PlaylistsSidebarContent : public juce::Component
+{
+public:
+    PlaylistsSidebarContent() = default;
+
+    // Fired with the index of the clicked item (same order as the main list).
+    std::function<void(int)> onItemClicked;
+
+    void updatePlaylists(const juce::Array<Playlist>& all);
+    void paint(juce::Graphics& g) override;
+    void mouseMove(const juce::MouseEvent& e) override;
+    void mouseExit(const juce::MouseEvent& e) override;
+    void mouseUp(const juce::MouseEvent& e) override;
+
+private:
+    juce::Array<Playlist> items;
+    int hoveredIndex = -1;
+
+    static constexpr int   kItemHeight = 38;
+    static constexpr float kFillRatio  = 0.8f;
+
+    int visibleCount() const;
+    int getItemIndexAt(juce::Point<int> pos) const;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PlaylistsSidebarContent)
+};
