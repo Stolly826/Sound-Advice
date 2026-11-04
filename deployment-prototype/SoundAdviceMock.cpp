@@ -1,10 +1,12 @@
 #define NOMINMAX
 #include <windows.h>
 #include <commdlg.h>
+#include <commctrl.h> //provides the Win32 slider controls and slider messages
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_events/juce_events.h>
 #include <memory>
+#include <string>
 #include "SongData.h"
 
 #pragma comment(lib, "comdlg32.lib")
@@ -59,6 +61,7 @@ public:
 
         transport.stop();
         transport.setSource(nullptr);
+        paused = false; //variable for tracking pause or not so resume doesn't resume a song that was never paused, also resets when new song is uploaded
 
         readerSource = std::make_unique<juce::AudioFormatReaderSource>(
             reader.release(), true
@@ -81,14 +84,43 @@ public:
         if (transport.hasStreamFinished())
             transport.setPosition(0.0);
 
-        transport.start(); //starts playing the selected song
+        transport.start(); //starts playing song so paused is now false again
+        paused = false;
         return true;
+    }
+
+
+    bool pause()
+    {
+        //only pause when a song is loaded and currently playing
+        if (!readerSource || !transport.isPlaying())
+            return false;
+
+        transport.stop(); //keep position of current song
+        paused = true;
+        return true;
+    }
+
+    bool resume()
+    {
+        if (!readerSource || !paused) //making sure the song is paused before resuming
+            return false;
+
+        transport.start(); //continue
+        paused = false;
+        return true;
+    }
+
+    void setVolume(float level)
+    {
+        transport.setGain(level); //assigned gain value for JUCE so 0 is mute, 0.5 is hald and 1 is full
     }
 
     void stop()
     {
-        transport.stop(); //stops playback
-        transport.setPosition(0.0); //moves the song back to the beginning
+        transport.stop();
+        transport.setPosition(0.0); //reset song
+        paused = false;
     }
 
 private:
@@ -98,12 +130,16 @@ private:
     juce::AudioSourcePlayer player;
     juce::AudioDeviceManager deviceManager;
     juce::String error;
+    //tracking if the song was paused or stopped
+    bool paused = false;
 };
 
 AudioEngine* audio = nullptr;
 SongLibrary* library = nullptr;
 HWND fileLabel;
 HWND detailsLabel;
+HWND volumeSlider; //volume slkider stuff
+HWND volumeLabel;
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -125,14 +161,38 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             150, 90, 100, 40,
             hwnd, (HMENU)3, nullptr, nullptr);
 
+        CreateWindowW(L"BUTTON", L"Pause",
+            WS_VISIBLE | WS_CHILD,
+            270, 90, 100, 40,
+            hwnd, (HMENU)4, nullptr, nullptr); //button 4 is pause
+
+        CreateWindowW(L"BUTTON", L"Resume",
+            WS_VISIBLE | WS_CHILD,
+            390, 90, 100, 40, //making sure resume and pause are next toi each other
+            hwnd, (HMENU)5, nullptr, nullptr); //button 5 is resume
+
+        volumeLabel = CreateWindowW(L"STATIC", L"Volume: 100%",
+            WS_VISIBLE | WS_CHILD,
+            30, 155, 150, 25,
+            hwnd, nullptr, nullptr, nullptr); //show %
+
+        volumeSlider = CreateWindowW(TRACKBAR_CLASSW, L"",
+            WS_VISIBLE | WS_CHILD | TBS_HORZ | TBS_NOTICKS,
+            30, 180, 300, 35,
+            hwnd, (HMENU)6, nullptr, nullptr); //6 is volume slider
+
+        SendMessageW(volumeSlider, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
+        SendMessageW(volumeSlider, TBM_SETPOS, TRUE, 100); 
+        audio->setVolume(1.0f); //match whatever is JUCE's expected volume or base setting to the slider
+
         fileLabel = CreateWindowW(L"STATIC", L"No audio selected",
             WS_VISIBLE | WS_CHILD,
-            30, 150, 700, 30,
+            30, 235, 700, 30,
             hwnd, nullptr, nullptr, nullptr);
 
         detailsLabel = CreateWindowW(L"STATIC", L"",
             WS_VISIBLE | WS_CHILD,
-            30, 190, 700, 200, //tall enough for one line per song detail
+            30, 275, 700, 200, //tall enough for one line per song detail
             hwnd, nullptr, nullptr, nullptr);
         return 0;
 
@@ -160,7 +220,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                     SetWindowTextW(fileLabel, filename);
 
                     //reading the whole song for bpm and volume can take a second so show the loading cursor
-                    HCURSOR oldCursor = SetCursor(LoadCursorW(nullptr, IDC_WAIT));
+                    HCURSOR oldCursor = SetCursor(LoadCursorA(nullptr, IDC_WAIT));
                     SongInfo song = SongData::readSong(audio->getFormats(), juce::File(juce::String(filename)));
                     SetCursor(oldCursor);
 
@@ -189,6 +249,27 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         case 3:
             audio->stop(); //stop
             return 0;
+
+        case 4:
+            audio->pause(); //whn you press button 4 you pause and dont reset song
+            return 0;
+
+        case 5:
+            audio->resume(); //continue on with button 5
+            return 0;
+        }
+        break;
+
+    case WM_HSCROLL:
+        if (reinterpret_cast<HWND>(lParam) == volumeSlider)
+        {
+            //get the current slider position an integer from 0 to 100
+            int volumePercent = static_cast<int>(SendMessageW(volumeSlider, TBM_GETPOS, 0, 0));
+            //concvert volume gain/control into JUCE's formatting so 0-100 is now 0-1.0
+            audio->setVolume(static_cast<float>(volumePercent) / 100.0f);
+            std::wstring text = L"Volume: " + std::to_wstring(volumePercent) + L"%"; //update volume when slider moves
+            SetWindowTextW(volumeLabel, text.c_str());
+            return 0;
         }
         break;
 
@@ -216,6 +297,13 @@ int main()
 
     SongLibrary songLibrary; //loads library.json from previous runs
     library = &songLibrary;
+
+    //initialize window slider controls
+    INITCOMMONCONTROLSEX controls = {};
+    controls.dwSize = sizeof(controls);
+    controls.dwICC = ICC_BAR_CLASSES; //enable trackbar/common control classes
+    if (!InitCommonControlsEx(&controls))
+        return 1;
 
     HINSTANCE instance = GetModuleHandleW(nullptr);
 
