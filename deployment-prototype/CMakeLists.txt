@@ -57,4 +57,5 @@ target_link_libraries(SoundAdviceMock PRIVATE
     juce::juce_audio_devices
     tag
     comdlg32
+    comctl32 #Windows slider (trackbar) control
 )
