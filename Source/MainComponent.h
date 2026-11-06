@@ -2,6 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "SoundAdviceLookAndFeel.h"
+#include "AudioEngine.h"
 #include "Sidebar.h"
 #include "Pages/MainMenuPage.h"
 #include "Pages/PlaylistsPage.h"
@@ -24,6 +25,8 @@ public:
 
 private:
     SoundAdviceLookAndFeel lookAndFeel; // destroyed last
+
+    AudioEngine audioEngine; //the audio engine thats shared by the front end
 
     Sidebar            sidebar;
     MainMenuPage       mainMenuPage;

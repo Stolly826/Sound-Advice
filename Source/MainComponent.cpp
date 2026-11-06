@@ -30,6 +30,35 @@ MainComponent::MainComponent()
 
     mixingPage.getTransitionsForPair      = [this](juce::String s1, juce::String s2) { return songsPage.getTransitionsForPair(s1, s2); };
 
+    // FRONTEND/BACKEND INTEGRATION: Connect the Mixing page controls to JUCE vibe coded 
+
+    mixingPage.onPlaySong = [this](const Song& song)
+        {
+            //only play songs with the right files attached mp3 and wav
+            if (song.filePath.isEmpty())
+                return false;
+
+            return audioEngine.playSong(juce::File(song.filePath));
+        };
+
+    //pause the song without losing its current position
+    mixingPage.onPause = [this] { audioEngine.pause(); };
+
+    //resume the previously paused song
+    mixingPage.onResume = [this] { audioEngine.resume(); };
+
+    //stop the song and reset its playback position
+    mixingPage.onStop = [this] { audioEngine.stop(); };
+
+    //changes JUCE volume with the slider
+    mixingPage.onVolumeChanged = [this](float gain)
+        {
+            audioEngine.setVolume(gain);
+        };
+
+    //starting volume is set at 75%
+    audioEngine.setVolume(0.75f);
+
     songsPage.getPlaylistsForSong = [this](const Song& s)
     {
         return playlistsPage.getPlaylistNamesContaining(s);

@@ -20,6 +20,34 @@ MixingPage::MixingPage()
     playButton.getProperties().set("iconShape", "play");
     addAndMakeVisible(playButton);
 
+    // FRONTEND/BACKEND INTEGRATION: Play the selected song using JUCE
+    playButton.onClick = [this]
+        {
+            // Make sure a valid song is selected from a playlist
+            if (currentPlaylist == nullptr ||
+                !juce::isPositiveAndBelow(currentIndex, currentPlaylist->songs.size()))
+                return;
+
+            const auto& song = currentPlaylist->songs[currentIndex];
+
+            // Ask MainComponent to play the selected audio file
+            if (!onPlaySong || !onPlaySong(song))
+                juce::AlertWindow::showMessageBoxAsync(
+                    juce::MessageBoxIconType::WarningIcon,
+                    "Unable to play song",
+                    "This song does not have a playable MP3 or WAV file.");
+        };
+
+    // FRONTEND/BACKEND INTEGRATION: Connect Pause, Resume, and Stop
+    pauseButton.onClick = [this] { if (onPause) onPause(); };
+    resumeButton.onClick = [this] { if (onResume) onResume(); };
+    stopButton.onClick = [this] { if (onStop) onStop(); };
+
+    // Make the new buttons visible in the frontend
+    addAndMakeVisible(pauseButton);
+    addAndMakeVisible(resumeButton);
+    addAndMakeVisible(stopButton);
+
     recordButton.setButtonText("");
     recordButton.getProperties().set("iconShape", "record");
     addAndMakeVisible(recordButton);
@@ -46,6 +74,11 @@ MixingPage::MixingPage()
     }
 
     setupSlider(volumeSlider,   0.0, 100.0,  75.0);
+    volumeSlider.onValueChange = [this]
+        {
+            if (onVolumeChanged)
+                onVolumeChanged(static_cast<float>(volumeSlider.getValue() / 100.0));
+        };
     setupSlider(pitchSlider,  -12.0,  12.0,   0.0);
     setupSlider(speedSlider,   50.0, 150.0, 100.0);
     setupSlider(trebleSlider, -12.0,  12.0,   0.0);
@@ -66,6 +99,7 @@ void MixingPage::setupSlider(juce::Slider& s, double min, double max, double def
 
 void MixingPage::setContent(Playlist* playlist, int songIndex)
 {
+    if (onStop) onStop();
     currentPlaylist = playlist;
     currentIndex    = songIndex;
 
@@ -160,6 +194,15 @@ void MixingPage::resized()
     {
         auto row = area.removeFromTop(30);
         playButton.setBounds      (row.removeFromLeft(32).withSizeKeepingCentre(32, 30));
+        row.removeFromLeft(6);
+        //position for new playback buttons
+        pauseButton.setBounds(row.removeFromLeft(58));
+        row.removeFromLeft(6);
+
+        resumeButton.setBounds(row.removeFromLeft(66));
+        row.removeFromLeft(6);
+
+        stopButton.setBounds(row.removeFromLeft(50));
         row.removeFromLeft(6);
         recordButton.setBounds    (row.removeFromLeft(32).withSizeKeepingCentre(32, 30));
         recordingsButton.setBounds(row.removeFromRight(96).withSizeKeepingCentre(96, 28));
