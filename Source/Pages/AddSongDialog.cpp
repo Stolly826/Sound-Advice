@@ -127,6 +127,7 @@ void AddSongDialog::onAddClicked()
     s.artist    = artistEditor.getText().trim();
     s.album     = albumEditor.getText().trim();
     s.dateAdded = juce::Time::getCurrentTime();
+    s.audioFile = selectedFile; // original file songs page copies it into the library
 
     if (onCreated) onCreated(std::move(s));
 

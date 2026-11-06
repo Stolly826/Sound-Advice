@@ -4,26 +4,34 @@
 
 SongsPage::SongsPage()
 {
-    // Seed a few placeholder songs that match the playlist contents so that
-    // "In Playlists" in the detail popup shows real data immediately.
-    auto add = [&](const char* title, const char* artist, const char* album,
-                   int year, int secs)
+    // load saved songs
+    // first run has no library yet so fall through to the demo songs below
+    if (library.hasSavedLibrary())
+        songs = library.loadSongs();
+    else
     {
-        Song s;
-        s.title           = title;
-        s.artist          = artist;
-        s.album           = album;
-        s.releaseYear     = year;
-        s.dateAdded       = juce::Time::getCurrentTime();
-        s.durationSeconds = secs;
-        songs.add(s);
-    };
+        // Seed a few placeholder songs that match the playlist contents so that
+        // "In Playlists" in the detail popup shows real data immediately.
+        auto add = [&](const char* title, const char* artist, const char* album,
+                       int year, int secs)
+        {
+            Song s;
+            s.title           = title;
+            s.artist          = artist;
+            s.album           = album;
+            s.releaseYear     = year;
+            s.dateAdded       = juce::Time::getCurrentTime();
+            s.durationSeconds = secs;
+            songs.add(s);
+        };
 
-    add("Eye of the Tiger", "Survivor",     "Eye of the Tiger", 1982, 244);
-    add("Thunderstruck",    "AC/DC",         "The Razors Edge",  1990, 292);
-    add("Lo-fi Dream",      "Various",       "Study Beats",      0,    185);
-    add("Blinding Lights",  "The Weeknd",    "After Hours",      2020, 200);
-    add("Bohemian Rhapsody","Queen",         "A Night at the Opera", 1975, 354);
+        add("Eye of the Tiger", "Survivor",     "Eye of the Tiger", 1982, 244);
+        add("Thunderstruck",    "AC/DC",         "The Razors Edge",  1990, 292);
+        add("Lo-fi Dream",      "Various",       "Study Beats",      0,    185);
+        add("Blinding Lights",  "The Weeknd",    "After Hours",      2020, 200);
+        add("Bohemian Rhapsody","Queen",         "A Night at the Opera", 1975, 354);
+        saveLibrary();
+    }
 
     titleLabel.setText("Song Library", juce::dontSendNotification);
     titleLabel.setFont(juce::FontOptions(24.0f, juce::Font::bold));
@@ -92,8 +100,30 @@ void SongsPage::rebuildList()
 
 void SongsPage::handleAddSong(Song s)
 {
+    // copy the picked file into the library folder
+    // songs added without a file skip this
+    if (s.audioFile != juce::File() && ! library.importSong(s))
+    {
+        juce::AlertWindow::showAsync(
+            juce::MessageBoxOptions()
+                .withIconType(juce::MessageBoxIconType::WarningIcon)
+                .withTitle("Couldn't add song")
+                .withMessage("The file couldn't be read or copied into the library.")
+                .withButton("OK")
+                .withAssociatedComponent(this),
+            nullptr);
+        return;
+    }
+
     songs.insert(0, std::move(s));
+    saveLibrary();
     rebuildList();
+}
+
+void SongsPage::saveLibrary()
+{
+    if (! library.saveSongs(songs))
+        DBG("couldnt save library to " + library.getIndexFile().getFullPathName());
 }
 
 void SongsPage::handleDeleteRequest(int index)
@@ -110,7 +140,9 @@ void SongsPage::handleDeleteRequest(int index)
         {
             if (result == 1)
             {
+                library.deleteSongFile(songs[index]); // remove the stored copy too
                 songs.remove(index);
+                saveLibrary();
                 rebuildList();
             }
         });
@@ -145,6 +177,8 @@ void SongsPage::addTransitionToSong(const juce::String& s1Title, const Transitio
 {
     for (auto& song : songs)
         if (song.title == s1Title) { song.transitions.add(t); break; }
+
+    saveLibrary();
 }
 
 void SongsPage::updateTransitionInSong(const juce::String& s1Title, int idx, const Transition& t)
@@ -152,6 +186,8 @@ void SongsPage::updateTransitionInSong(const juce::String& s1Title, int idx, con
     for (auto& song : songs)
         if (song.title == s1Title && idx >= 0 && idx < song.transitions.size())
             { song.transitions.set(idx, t); break; }
+
+    saveLibrary();
 }
 
 void SongsPage::showSongDetail(int index)

@@ -29,6 +29,7 @@ MainComponent::MainComponent()
     transitionsPage.updateTransitionInSong= [this](juce::String s1, int idx, Transition t) { songsPage.updateTransitionInSong(s1, idx, t); };
 
     mixingPage.getTransitionsForPair      = [this](juce::String s1, juce::String s2) { return songsPage.getTransitionsForPair(s1, s2); };
+    mixingPage.setAudioPlayer(&audioPlayer); // play button charts volume
 
     songsPage.getPlaylistsForSong = [this](const Song& s)
     {

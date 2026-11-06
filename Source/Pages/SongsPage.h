@@ -5,6 +5,7 @@
 #include "SongRow.h"
 #include "NewPlaylistRow.h"
 #include "SongsSidebarContent.h"
+#include "../MusicLibrary.h"
 
 // Global song library. Every song the user has ever added lives here.
 // Clicking a row opens a detail popup (name, artist, album, year,
@@ -29,6 +30,7 @@ public:
     juce::Component& getSidebarContent() { return sidebarContent; }
 
 private:
+    MusicLibrary                  library; // saves songs to disk
     juce::Array<Song>             songs;
 
     juce::Label                   titleLabel;
@@ -40,6 +42,7 @@ private:
     SongsSidebarContent sidebarContent;
 
     void rebuildList();
+    void saveLibrary();
     void handleAddSong(Song s);
     void handleDeleteRequest(int index);
     void showAddSongDialog();

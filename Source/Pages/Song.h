@@ -12,6 +12,7 @@ struct Song
     juce::Time              dateAdded;
     int                     durationSeconds = 0; // 0 = unknown
     juce::Array<Transition> transitions;
+    juce::File              audioFile; // stored copy in the library folder empty if no audio
 };
 
 inline juce::String formatSongDuration(int secs)

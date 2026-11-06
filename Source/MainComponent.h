@@ -9,6 +9,7 @@
 #include "Pages/SongsPage.h"
 #include "Pages/TransitionsPage.h"
 #include "Pages/MixingPage.h"
+#include "AudioPlayer.h"
 
 // Root UI component. Owns the sidebar and all pages.
 // Exactly one page is visible at a time; showPage() handles switching
@@ -24,6 +25,7 @@ public:
 
 private:
     SoundAdviceLookAndFeel lookAndFeel; // destroyed last
+    AudioPlayer            audioPlayer; // above the pages so it outlives them
 
     Sidebar            sidebar;
     MainMenuPage       mainMenuPage;

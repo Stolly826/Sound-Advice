@@ -18,6 +18,7 @@ MixingPage::MixingPage()
 
     playButton.setButtonText("");
     playButton.getProperties().set("iconShape", "play");
+    playButton.onClick = [this] { togglePlay(); };
     addAndMakeVisible(playButton);
 
     recordButton.setButtonText("");
@@ -26,6 +27,8 @@ MixingPage::MixingPage()
 
     addAndMakeVisible(recordingsButton);
     chart2.setIsNextSong(true);
+    chart1.onJumpTo = [this](float t) { jumpTo(t); };
+    chart1.onSkip   = [this] { skipToNext(); };
     addAndMakeVisible(chart1);
     addAndMakeVisible(chart2);
     transitionPresetsButton.onClick = [this] { showTransitionPresets(); };
@@ -51,6 +54,12 @@ MixingPage::MixingPage()
     setupSlider(trebleSlider, -12.0,  12.0,   0.0);
     setupSlider(midsSlider,   -12.0,  12.0,   0.0);
     setupSlider(bassSlider,   -12.0,  12.0,   0.0);
+
+    // volume slider is 0 to 100 player wants 0 to 1
+    volumeSlider.onValueChange = [this]
+    {
+        if (player != nullptr) player->setVolume((float)volumeSlider.getValue() / 100.0f);
+    };
 }
 
 void MixingPage::setupSlider(juce::Slider& s, double min, double max, double def)
@@ -93,6 +102,109 @@ void MixingPage::setContent(Playlist* playlist, int songIndex)
             if (currentPlaylist && idx >= 0 && idx < currentPlaylist->songs.size())
                 setContent(currentPlaylist, idx);
         };
+    }
+
+    loadCurrentSong();
+}
+
+// ── Playback ──────────────────────────────────────────────────────────────────
+
+void MixingPage::loadCurrentSong()
+{
+    songLoaded = false;
+    if (player == nullptr) return;
+
+    // stop whatever was playing before
+    player->pause();
+
+    if (currentPlaylist != nullptr && currentIndex >= 0 && currentIndex < currentPlaylist->songs.size())
+    {
+        const auto& song = currentPlaylist->songs[currentIndex];
+
+        // demo songs and songs added without a file have nothing to play
+        if (song.audioFile.existsAsFile() && player->loadFile(song.audioFile))
+        {
+            songLoaded = true;
+            player->setVolume((float)volumeSlider.getValue() / 100.0f);
+
+            // use the real length if the song didnt have one
+            if (song.durationSeconds <= 0)
+                chart1.setSongDuration(juce::roundToInt(player->getLengthInSeconds()));
+        }
+    }
+
+    playButton.setEnabled(songLoaded);
+    chart1.setPlayhead(songLoaded ? 0.0f : -1.0f);
+    updatePlayButton();
+}
+
+void MixingPage::togglePlay()
+{
+    if (! songLoaded) return;
+
+    if (player->isPlaying()) player->pause();
+    else                     player->play();
+
+    updatePlayButton();
+}
+
+void MixingPage::jumpTo(float position)
+{
+    if (! songLoaded) return;
+
+    // position is 0 to 1 across the chart
+    player->playFrom(position * player->getLengthInSeconds());
+    updatePlayButton();
+}
+
+void MixingPage::skipToNext()
+{
+    if (currentPlaylist == nullptr || currentIndex + 1 >= currentPlaylist->songs.size()) return;
+
+    // keep playing if it was already playing
+    const bool wasPlaying = songLoaded && player->isPlaying();
+    setContent(currentPlaylist, currentIndex + 1);
+
+    if (wasPlaying && songLoaded)
+    {
+        player->play();
+        updatePlayButton();
+    }
+}
+
+void MixingPage::updatePlayButton()
+{
+    // pause icon while playing play icon otherwise
+    const juce::String shape = (songLoaded && player->isPlaying()) ? "pause" : "play";
+    if (playButton.getProperties()["iconShape"].toString() != shape)
+    {
+        playButton.getProperties().set("iconShape", shape);
+        playButton.repaint();
+    }
+}
+
+void MixingPage::timerCallback()
+{
+    if (! songLoaded) return;
+
+    const double length = player->getLengthInSeconds();
+    chart1.setPlayhead(length > 0.0 ? (float)(player->getPosition() / length) : 0.0f);
+
+    // flips back to play when the song ends
+    updatePlayButton();
+}
+
+void MixingPage::visibilityChanged()
+{
+    // only update the playhead while the page is showing
+    // leaving the page pauses the song
+    if (isVisible())
+        startTimerHz(30);
+    else
+    {
+        stopTimer();
+        if (songLoaded) player->pause();
+        updatePlayButton();
     }
 }
 

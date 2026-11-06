@@ -5,8 +5,10 @@
 #include "Transition.h"
 #include "SongChartComponent.h"
 #include "SongsSidebarContent.h"
+#include "../AudioPlayer.h"
 
-class MixingPage : public juce::Component
+class MixingPage : public juce::Component,
+                   private juce::Timer // moves the playhead
 {
 public:
     std::function<juce::Array<Transition>(juce::String, juce::String)> getTransitionsForPair;
@@ -15,14 +17,21 @@ public:
 
     void setContent(Playlist* playlist, int songIndex);
 
+    // shared player owned by main component
+    void setAudioPlayer(AudioPlayer* p) { player = p; }
+
     void paint  (juce::Graphics& g) override;
     void resized()                  override;
+    void visibilityChanged()        override;
 
     juce::Component& getSidebarContent() { return sidebarContent; }
 
 private:
     Playlist* currentPlaylist = nullptr;
     int       currentIndex    = 0;
+
+    AudioPlayer* player     = nullptr;
+    bool         songLoaded = false; // current song has audio ready to play
 
     // Header
     juce::Label      titleLabel;
@@ -58,6 +67,14 @@ private:
 
     void setupSlider(juce::Slider& s, double min, double max, double defaultVal);
     void showTransitionPresets();
+
+    // playback
+    void loadCurrentSong();
+    void togglePlay();
+    void jumpTo(float position);
+    void skipToNext();
+    void updatePlayButton();
+    void timerCallback() override;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MixingPage)
 };
