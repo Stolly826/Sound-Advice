@@ -38,6 +38,8 @@ target_sources(SoundAdvice PRIVATE
     Source/Main.cpp
     Source/MainComponent.cpp
     Source/MainComponent.h
+    Source/AudioEngine.cpp
+    Source/AudioEngine.h
     Source/Sidebar.cpp
     Source/Sidebar.h
     Source/SoundAdviceLookAndFeel.cpp

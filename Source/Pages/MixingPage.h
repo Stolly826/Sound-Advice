@@ -11,6 +11,12 @@ class MixingPage : public juce::Component
 public:
     std::function<juce::Array<Transition>(juce::String, juce::String)> getTransitionsForPair;
 
+    std::function<bool(const Song&)> onPlaySong;
+    std::function<void()> onPause;
+    std::function<void()> onResume;
+    std::function<void()> onStop;
+    std::function<void(float)> onVolumeChanged;
+
     MixingPage();
 
     void setContent(Playlist* playlist, int songIndex);
@@ -27,6 +33,9 @@ private:
     // Header
     juce::Label      titleLabel;
     juce::TextButton playButton;
+    juce::TextButton pauseButton{ "Pause" };
+    juce::TextButton resumeButton{ "Resume" };
+    juce::TextButton stopButton{ "Stop" };
     juce::TextButton recordButton;
     juce::TextButton recordingsButton  { "Recordings" };
 

@@ -126,6 +126,7 @@ void AddSongDialog::onAddClicked()
     s.title     = name.isNotEmpty() ? name : selectedFile.getFileNameWithoutExtension();
     s.artist    = artistEditor.getText().trim();
     s.album     = albumEditor.getText().trim();
+    s.filePath = selectedFile.existsAsFile() ? selectedFile.getFullPathName() : juce::String{}; //saves file full location jasen edit
     s.dateAdded = juce::Time::getCurrentTime();
 
     if (onCreated) onCreated(std::move(s));
