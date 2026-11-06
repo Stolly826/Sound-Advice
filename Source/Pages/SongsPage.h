@@ -22,6 +22,10 @@ public:
 
     const juce::Array<Song>& getSongs() const { return songs; }
 
+    // copy the file in add to the library and save
+    // song is updated to point at the stored copy false if it failed
+    bool addSongToLibrary(Song& s);
+
     juce::Array<Transition> getTransitionsForPair(const juce::String& s1,
                                                    const juce::String& s2) const;
     void addTransitionToSong    (const juce::String& s1Title, const Transition& t);

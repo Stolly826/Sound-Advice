@@ -100,6 +100,11 @@ void SongsPage::rebuildList()
 
 void SongsPage::handleAddSong(Song s)
 {
+    addSongToLibrary(s);
+}
+
+bool SongsPage::addSongToLibrary(Song& s)
+{
     // copy the picked file into the library folder
     // songs added without a file skip this
     if (s.audioFile != juce::File() && ! library.importSong(s))
@@ -112,12 +117,13 @@ void SongsPage::handleAddSong(Song s)
                 .withButton("OK")
                 .withAssociatedComponent(this),
             nullptr);
-        return;
+        return false;
     }
 
-    songs.insert(0, std::move(s));
+    songs.insert(0, s);
     saveLibrary();
     rebuildList();
+    return true;
 }
 
 void SongsPage::saveLibrary()

@@ -1,7 +1,44 @@
 #include "PlaylistsPage.h"
 #include "NewPlaylistDialog.h"
 
+static constexpr int kHeaderH = 28; // group header height
+
 PlaylistsPage::PlaylistsPage()
+{
+    // load saved playlists first run has none so make the demo ones
+    if (library.hasSavedPlaylists())
+    {
+        for (const auto& p : library.loadPlaylists())
+            playlists.add(new Playlist(p));
+    }
+    else
+    {
+        seedDemoPlaylists();
+        savePlaylists();
+    }
+
+    titleLabel.setText("Playlists", juce::dontSendNotification);
+    titleLabel.setFont(juce::FontOptions(24.0f, juce::Font::bold));
+    addAndMakeVisible(titleLabel);
+
+    listViewport.setViewedComponent(&listContainer, false);
+    listViewport.setScrollBarsShown(true, false);
+    addAndMakeVisible(listViewport);
+
+    listContainer.addAndMakeVisible(newPlaylistRow);
+    newPlaylistRow.onClick = [this] { showNewPlaylistDialog(); };
+
+    // Sidebar item click mirrors clicking the same playlist row.
+    sidebarContent.onItemClicked = [this](int index)
+    {
+        if (index >= 0 && index < playlists.size())
+            if (onPlaylistClicked) onPlaylistClicked(playlists[index]);
+    };
+
+    rebuildList();
+}
+
+void PlaylistsPage::seedDemoPlaylists()
 {
     // Seed two placeholder playlists (newest first).
     {
@@ -31,26 +68,6 @@ PlaylistsPage::PlaylistsPage()
         s1.durationSeconds = 185;
         p->songs.add(s1);
     }
-
-    titleLabel.setText("Playlists", juce::dontSendNotification);
-    titleLabel.setFont(juce::FontOptions(24.0f, juce::Font::bold));
-    addAndMakeVisible(titleLabel);
-
-    listViewport.setViewedComponent(&listContainer, false);
-    listViewport.setScrollBarsShown(true, false);
-    addAndMakeVisible(listViewport);
-
-    listContainer.addAndMakeVisible(newPlaylistRow);
-    newPlaylistRow.onClick = [this] { showNewPlaylistDialog(); };
-
-    // Sidebar item click mirrors clicking the same playlist row.
-    sidebarContent.onItemClicked = [this](int index)
-    {
-        if (index >= 0 && index < playlists.size())
-            if (onPlaylistClicked) onPlaylistClicked(playlists[index]);
-    };
-
-    rebuildList();
 }
 
 void PlaylistsPage::paint(juce::Graphics& g)
@@ -70,8 +87,8 @@ void PlaylistsPage::resized()
     const int pad   = 8;
 
     int totalH = pad + NewPlaylistRow::kHeight + pad;
-    for (int i = 0; i < rows.size(); ++i)
-        totalH += PlaylistRow::kHeight + pad;
+    for (const auto& item : layoutItems)
+        totalH += item.second + pad;
 
     listContainer.setSize(viewW, totalH);
 
@@ -79,23 +96,66 @@ void PlaylistsPage::resized()
     newPlaylistRow.setBounds(4, y, rowW, NewPlaylistRow::kHeight);
     y += NewPlaylistRow::kHeight + pad;
 
-    for (auto* row : rows)
+    // headers and rows stacked in group order
+    for (const auto& item : layoutItems)
     {
-        row->setBounds(4, y, rowW, PlaylistRow::kHeight);
-        y += PlaylistRow::kHeight + pad;
+        item.first->setBounds(4, y, rowW, item.second);
+        y += item.second + pad;
     }
+}
+
+juce::StringArray PlaylistsPage::getGroupNames() const
+{
+    juce::StringArray groups;
+    for (auto* p : playlists)
+        if (p->group.isNotEmpty())
+            groups.addIfNotAlreadyThere(p->group, true); // ignore case
+
+    groups.sortNatural();
+    return groups;
 }
 
 void PlaylistsPage::rebuildList()
 {
     rows.clear();
+    groupHeaders.clear();
+    layoutItems.clear();
 
-    for (int i = 0; i < playlists.size(); ++i)
+    // groups a to z then playlists with no group under other
+    // headers only show once at least one playlist has a group
+    auto groups = getGroupNames();
+    const bool showHeaders = ! groups.isEmpty();
+    groups.add({});
+
+    for (const auto& group : groups)
     {
-        auto* row = rows.add(new PlaylistRow(*playlists[i]));
-        row->onDeleteClicked = [this, i] { handleDeleteRequest(i); };
-        row->onClicked       = [this, i] { if (onPlaylistClicked) onPlaylistClicked(playlists[i]); };
-        listContainer.addAndMakeVisible(row);
+        juce::Array<Playlist*> inGroup;
+        for (auto* p : playlists)
+            if (p->group.equalsIgnoreCase(group))
+                inGroup.add(p);
+
+        if (inGroup.isEmpty())
+            continue;
+
+        if (showHeaders)
+        {
+            auto* header = groupHeaders.add(new juce::Label({}, group.isEmpty() ? "Other" : group));
+            header->setFont(juce::FontOptions(13.0f, juce::Font::bold));
+            header->setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.55f));
+            header->setJustificationType(juce::Justification::bottomLeft);
+            listContainer.addAndMakeVisible(header);
+            layoutItems.push_back({ header, kHeaderH });
+        }
+
+        for (auto* p : inGroup)
+        {
+            // rows hold the playlist pointer so delete still works when grouped
+            auto* row = rows.add(new PlaylistRow(*p));
+            row->onDeleteClicked = [this, p] { handleDeleteRequest(p); };
+            row->onClicked       = [this, p] { if (onPlaylistClicked) onPlaylistClicked(p); };
+            listContainer.addAndMakeVisible(row);
+            layoutItems.push_back({ row, PlaylistRow::kHeight });
+        }
     }
 
     // Build snapshot for sidebar (OwnedArray → Array copy)
@@ -106,30 +166,51 @@ void PlaylistsPage::rebuildList()
     resized();
 }
 
-void PlaylistsPage::handleDeleteRequest(int index)
+void PlaylistsPage::savePlaylists()
+{
+    if (! library.savePlaylists(playlists))
+        DBG("couldnt save playlists to " + library.getPlaylistsFile().getFullPathName());
+}
+
+void PlaylistsPage::playlistChanged()
+{
+    savePlaylists();
+    rebuildList();
+}
+
+void PlaylistsPage::handleDeleteRequest(Playlist* playlist)
 {
     juce::AlertWindow::showAsync(
         juce::MessageBoxOptions()
             .withIconType(juce::MessageBoxIconType::NoIcon)
-            .withTitle("Delete \"" + playlists[index]->name + "\"?")
+            .withTitle("Delete \"" + playlist->name + "\"?")
             .withMessage("This will permanently delete the playlist.")
             .withButton("Delete")
             .withButton("Cancel")
             .withAssociatedComponent(this),
-        [this, index](int result)
+        [this, playlist](int result)
         {
-            if (result == 1)
+            const int index = playlists.indexOf(playlist);
+            if (result == 1 && index >= 0)
             {
+                library.deletePlaylistImage(*playlist); // remove the copied image too
                 playlists.remove(index);
-                rebuildList();
+                playlistChanged();
             }
         });
 }
 
 void PlaylistsPage::handleNewPlaylist(Playlist p)
 {
+    // copy the picked image into the library keep going without it if that fails
+    if (p.imageFile != juce::File() && ! library.importPlaylistImage(p))
+    {
+        p.image     = {};
+        p.imageFile = juce::File();
+    }
+
     playlists.insert(0, new Playlist(std::move(p)));
-    rebuildList();
+    playlistChanged();
 }
 
 juce::StringArray PlaylistsPage::getPlaylistNamesContaining(const Song& song) const
@@ -147,7 +228,7 @@ juce::StringArray PlaylistsPage::getPlaylistNamesContaining(const Song& song) co
 
 void PlaylistsPage::showNewPlaylistDialog()
 {
-    auto* content = new NewPlaylistDialog();
+    auto* content = new NewPlaylistDialog(getGroupNames());
     content->onCreated = [this](Playlist p) { handleNewPlaylist(std::move(p)); };
 
     juce::DialogWindow::LaunchOptions opts;
@@ -156,5 +237,45 @@ void PlaylistsPage::showNewPlaylistDialog()
     opts.useNativeTitleBar       = false;
     opts.resizable               = false;
     opts.componentToCentreAround = this;
+    opts.launchAsync();
+}
+
+void PlaylistsPage::showEditDialog(Playlist* playlist, juce::Component* centreAround, std::function<void()> onDone)
+{
+    if (playlist == nullptr) return;
+
+    auto* content = new NewPlaylistDialog(getGroupNames(), playlist);
+
+    content->onCreated = [this, playlist, onDone](Playlist edited)
+    {
+        if (playlists.indexOf(playlist) < 0) return;
+
+        // new image picked copy it in and drop the old copy
+        if (edited.imageFile != playlist->imageFile)
+        {
+            if (edited.imageFile == juce::File() || library.importPlaylistImage(edited))
+            {
+                library.deletePlaylistImage(*playlist);
+                playlist->image     = edited.image;
+                playlist->imageFile = edited.imageFile;
+            }
+        }
+
+        // songs stay as they are only the details change
+        playlist->name        = edited.name;
+        playlist->group       = edited.group;
+        playlist->description = edited.description;
+        playlist->lastUpdated = juce::Time::getCurrentTime();
+
+        playlistChanged();
+        if (onDone) onDone();
+    };
+
+    juce::DialogWindow::LaunchOptions opts;
+    opts.content.setOwned(content);
+    opts.dialogTitle             = "Edit Playlist";
+    opts.useNativeTitleBar       = false;
+    opts.resizable               = false;
+    opts.componentToCentreAround = centreAround != nullptr ? centreAround : this;
     opts.launchAsync();
 }

@@ -23,6 +23,13 @@ MainComponent::MainComponent()
 
     playlistDetailPage.onSongClicked = [this](Playlist* p, int idx) { showMixingPage(p, idx); };
     playlistDetailPage.getAllSongs   = [this]() { return songsPage.getSongs(); };
+    // order changes and added songs get saved
+    playlistDetailPage.onPlaylistChanged = [this] { playlistsPage.playlistChanged(); };
+    playlistDetailPage.addSongToLibrary  = [this](Song& s) { return songsPage.addSongToLibrary(s); };
+    playlistDetailPage.onEditClicked     = [this](Playlist* p)
+    {
+        playlistsPage.showEditDialog(p, &playlistDetailPage, [this] { playlistDetailPage.refreshHeader(); });
+    };
     transitionsPage.getAllSongs           = [this]()                              { return songsPage.getSongs(); };
     transitionsPage.getTransitionsForPair = [this](juce::String s1, juce::String s2) { return songsPage.getTransitionsForPair(s1, s2); };
     transitionsPage.addTransitionToSong   = [this](juce::String s1, Transition t)    { songsPage.addTransitionToSong(s1, t); };

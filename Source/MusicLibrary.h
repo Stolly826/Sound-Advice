@@ -1,11 +1,12 @@
 #pragma once
 
 #include <juce_audio_formats/juce_audio_formats.h> // reading song length
-#include "Pages/Song.h"
+#include "Pages/Playlist.h"
 
 // local storage for the song library
 // uploaded files get copied into the app data folder with iostream
 // song info gets saved to library.json next to them so it survives restarts
+// playlists go in playlists.json in their saved order with images in Images
 //
 // windows  C:\Users\<you>\AppData\Roaming\Sound Advice
 // mac      ~/Library/Application Support/Sound Advice
@@ -34,6 +35,18 @@ public:
     // delete the stored copy only touches files inside the songs folder
     void deleteSongFile (const Song& song) const;
 
+    // playlists
+    juce::File getImagesFolder() const;    // copied playlist images
+    juce::File getPlaylistsFile() const;   // playlists.json
+    bool hasSavedPlaylists() const;
+    juce::Array<Playlist> loadPlaylists() const;
+    bool savePlaylists (const juce::OwnedArray<Playlist>& playlists) const;
+
+    // copy playlist.imageFile into the images folder and load it
+    // false if the image cant be read or copied
+    bool importPlaylistImage (Playlist& playlist);
+    void deletePlaylistImage (const Playlist& playlist) const;
+
 private:
     juce::File libraryFolder;
     juce::AudioFormatManager formatManager;
@@ -44,6 +57,10 @@ private:
     // song <-> json
     juce::var  songToVar (const Song& song) const;
     Song       varToSong (const juce::var& v) const;
+
+    // playlist <-> json
+    juce::var  playlistToVar (const Playlist& p) const;
+    Playlist   varToPlaylist (const juce::var& v) const;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MusicLibrary)
 };

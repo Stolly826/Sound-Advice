@@ -14,7 +14,8 @@
 // Root UI component. Owns the sidebar and all pages.
 // Exactly one page is visible at a time; showPage() handles switching
 // and shows/hides the sidebar accordingly.
-class MainComponent : public juce::Component
+class MainComponent : public juce::Component,
+                      public juce::DragAndDropContainer // lets songs be dragged between parts of the window
 {
 public:
     MainComponent();
