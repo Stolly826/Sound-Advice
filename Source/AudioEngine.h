@@ -4,6 +4,7 @@
 // This replaces the separate Win32-specific AudioEngine in deployment-prototype.
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_formats/juce_audio_formats.h>
+#include <juce_dsp/juce_dsp.h>
 #include <memory>
 
 class AudioEngine
@@ -23,12 +24,18 @@ public:
     void stop();
     void setVolume(float gain);
     void setPlaybackSpeed(double speedMultiplier);
+    void setBass(float decibels);
+    void setMids(float decibels);
+    void setTreble(float decibels);
 
 private:
     juce::AudioFormatManager formatManager;
     std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
     juce::AudioTransportSource transport;
     juce::AudioSourcePlayer audioPlayer;
+    juce::IIRFilterAudioSource bassFilter{ &speedResampler, false };
+    juce::IIRFilterAudioSource midsFilter{ &bassFilter, false };
+    juce::IIRFilterAudioSource trebleFilter{ &midsFilter, false };
     juce::ResamplingAudioSource speedResampler{ &transport, false, 2 };
     juce::AudioDeviceManager deviceManager;
     juce::String deviceError;

@@ -89,6 +89,23 @@ MixingPage::MixingPage()
     setupSlider(trebleSlider, -12.0,  12.0,   0.0);
     setupSlider(midsSlider,   -12.0,  12.0,   0.0);
     setupSlider(bassSlider,   -12.0,  12.0,   0.0);
+    bassSlider.onValueChange = [this]
+        {
+            if (onBassChanged)
+                onBassChanged(static_cast<float>(bassSlider.getValue()));
+        };
+
+    midsSlider.onValueChange = [this]
+        {
+            if (onMidsChanged)
+                onMidsChanged(static_cast<float>(midsSlider.getValue()));
+        };
+
+    trebleSlider.onValueChange = [this]
+        {
+            if (onTrebleChanged)
+                onTrebleChanged(static_cast<float>(trebleSlider.getValue()));
+        };
 }
 
 void MixingPage::setupSlider(juce::Slider& s, double min, double max, double def)

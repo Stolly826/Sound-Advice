@@ -9,7 +9,10 @@ AudioEngine::AudioEngine()
     deviceError = deviceManager.initialiseWithDefaultDevices(0, 2);
     if (deviceError.isEmpty())
     {
-        audioPlayer.setSource(&speedResampler); //sending audio through resampler scrum37
+        setBass(0.0f);
+        setMids(0.0f);
+        setTreble(0.0f);
+        audioPlayer.setSource(&trebleFilter); //sending audio through resampler scrum37
         deviceManager.addAudioCallback(&audioPlayer);
     }
 }
@@ -94,4 +97,46 @@ void AudioEngine::setPlaybackSpeed(double speedMultiplier)
     //parameters for the speed so it stays between 0.5 and 1.5
     speedMultiplier = juce::jlimit(0.5, 1.5, speedMultiplier);
     speedResampler.setResamplingRatio(speedMultiplier);
+}
+
+//Bass
+void AudioEngine::setBass(float decibels)
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+    if (device == nullptr) return;
+
+    float gain = juce::Decibels::decibelsToGain(
+        juce::jlimit(-12.0f, 12.0f, decibels));
+
+    bassFilter.setCoefficients(
+        juce::IIRCoefficients::makeLowShelf(
+            device->getCurrentSampleRate(), 200.0, 0.707, gain));
+}
+
+//middle frequencies
+void AudioEngine::setMids(float decibels)
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+    if (device == nullptr) return;
+
+    float gain = juce::Decibels::decibelsToGain(
+        juce::jlimit(-12.0f, 12.0f, decibels));
+
+    midsFilter.setCoefficients(
+        juce::IIRCoefficients::makePeakFilter(
+            device->getCurrentSampleRate(), 1000.0, 0.707, gain));
+}
+
+//Treble
+void AudioEngine::setTreble(float decibels)
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+    if (device == nullptr) return;
+
+    float gain = juce::Decibels::decibelsToGain(
+        juce::jlimit(-12.0f, 12.0f, decibels));
+
+    trebleFilter.setCoefficients(
+        juce::IIRCoefficients::makeHighShelf(
+            device->getCurrentSampleRate(), 4000.0, 0.707, gain));
 }

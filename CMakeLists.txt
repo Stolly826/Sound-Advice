@@ -118,6 +118,7 @@ target_link_libraries(SoundAdvice
         juce::juce_audio_basics
         juce::juce_audio_formats   # reading WAV / MP3
         juce::juce_audio_devices   # speakers / Core Audio / WASAPI
+        juce::juce_dsp #audio processing for bass and stuff
         juce::juce_audio_utils     # waveform thumbnails, device selector UI
     PUBLIC
         juce::juce_recommended_config_flags
