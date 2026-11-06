@@ -21,6 +21,23 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(JUCE)
 
 # ---------------------------------------------------------------------------
+# TagLib
+# ---------------------------------------------------------------------------
+# Reads the song title, artist, album etc. from the file tags (see Source/SongData.h).
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING     OFF CACHE BOOL "" FORCE)
+set(BUILD_EXAMPLES    OFF CACHE BOOL "" FORCE)
+set(BUILD_BINDINGS    OFF CACHE BOOL "" FORCE)
+set(WITH_ZLIB         OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    taglib
+    GIT_REPOSITORY https://github.com/taglib/taglib.git
+    GIT_TAG        v2.0.2
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(taglib)
+
+# ---------------------------------------------------------------------------
 # The app
 # ---------------------------------------------------------------------------
 # juce_add_gui_app (not plain add_executable) gives us a real Windows GUI exe
@@ -40,6 +57,8 @@ target_sources(SoundAdvice PRIVATE
     Source/MainComponent.h
     Source/AudioEngine.cpp
     Source/AudioEngine.h
+    Source/SongData.h
+    Source/SongSettings.h
     Source/Sidebar.cpp
     Source/Sidebar.h
     Source/SoundAdviceLookAndFeel.cpp
@@ -102,6 +121,12 @@ endif()
 
 target_compile_features(SoundAdvice PRIVATE cxx_std_17)
 
+# TagLib only exports its include folders when installed, so point at them directly.
+target_include_directories(SoundAdvice SYSTEM PRIVATE
+    ${taglib_SOURCE_DIR}/taglib
+    ${taglib_SOURCE_DIR}/taglib/toolkit
+)
+
 target_compile_definitions(SoundAdvice PRIVATE
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:SoundAdvice,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:SoundAdvice,JUCE_VERSION>"
@@ -109,6 +134,7 @@ target_compile_definitions(SoundAdvice PRIVATE
     JUCE_USE_CURL=0               # we don't need networking
     JUCE_WEB_BROWSER=0            # no embedded browser
     JUCE_DISPLAY_SPLASH_SCREEN=0
+    TAGLIB_STATIC
 )
 
 target_link_libraries(SoundAdvice
@@ -119,6 +145,7 @@ target_link_libraries(SoundAdvice
         juce::juce_audio_formats   # reading WAV / MP3
         juce::juce_audio_devices   # speakers / Core Audio / WASAPI
         juce::juce_audio_utils     # waveform thumbnails, device selector UI
+        tag                        # TagLib, reading song details from file tags
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags

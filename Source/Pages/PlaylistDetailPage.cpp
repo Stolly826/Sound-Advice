@@ -136,7 +136,12 @@ void PlaylistDetailPage::showPickSongDialog()
 void PlaylistDetailPage::showAddSongDialog()
 {
     auto* content = new AddSongDialog();
-    content->onCreated = [this](Song s) { handleAddSong(std::move(s)); };
+    content->readSongDetails = readSongDetails;
+    content->onCreated = [this](Song s)
+    {
+        if (onNewSong) onNewSong(s); // A new song joins the library as well as this playlist.
+        handleAddSong(std::move(s));
+    };
 
     juce::DialogWindow::LaunchOptions opts;
     opts.content.setOwned(content);

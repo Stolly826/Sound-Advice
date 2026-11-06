@@ -1,6 +1,19 @@
 #include "MainComponent.h"
 
 static constexpr int kSidebarWidth = 220;
+static constexpr int kSaveDelayMs  = 500;
+
+static Song toSong(const SongInfo& info)
+{
+    Song s;
+    s.title           = info.title;
+    s.artist          = info.artist;
+    s.album           = info.album;
+    s.filePath        = info.path;
+    s.dateAdded       = juce::Time::fromISO8601(info.addedAt);
+    s.durationSeconds = juce::roundToInt(info.lengthSeconds);
+    return s;
+}
 
 MainComponent::MainComponent()
 {
@@ -32,12 +45,13 @@ MainComponent::MainComponent()
 
     // FRONTEND/BACKEND INTEGRATION: Connect the Mixing page controls to JUCE vibe coded 
 
-    mixingPage.onPlaySong = [this](const Song& song)
+    mixingPage.onPlaySong = [this](const Song& song, const SongSettings& settings)
         {
             //only play songs with the right files attached mp3 and wav
             if (song.filePath.isEmpty())
                 return false;
 
+            audioEngine.applySettings(settings);
             return audioEngine.playSong(juce::File(song.filePath));
         };
 
@@ -50,14 +64,40 @@ MainComponent::MainComponent()
     //stop the song and reset its playback position
     mixingPage.onStop = [this] { audioEngine.stop(); };
 
-    //changes JUCE volume with the slider
-    mixingPage.onVolumeChanged = [this](float gain)
+    //each song remembers its own speed, volume, gain and eq in the library
+    mixingPage.getSongSettings = [this](const Song& song)
         {
-            audioEngine.setVolume(gain);
+            const auto* info = songLibrary.findByPath(song.filePath);
+            return info != nullptr ? info->settings : SongSettings{};
         };
 
-    //starting volume is set at 75%
-    audioEngine.setVolume(0.75f);
+    //changes are heard straight away, the file gets written once the sliders settle
+    mixingPage.onSongSettingsChanged = [this](const Song& song, const SongSettings& settings)
+        {
+            audioEngine.applySettings(settings);
+            songLibrary.setSettings(song.filePath, settings);
+            startTimer(kSaveDelayMs);
+        };
+
+    // FRONTEND/BACKEND INTEGRATION: Connect the song pages to the song library
+
+    //reads the song details from a file chosen in the add song dialog
+    auto readSongDetails = [this](const juce::File& file)
+        {
+            return toSong(SongData::readDetails(audioEngine.getFormats(), file));
+        };
+    songsPage.readSongDetails          = readSongDetails;
+    playlistDetailPage.readSongDetails = readSongDetails;
+
+    songsPage.onNewSong          = [this](const Song& s) { addUploadedSong(s); };
+    playlistDetailPage.onNewSong = [this](const Song& s) { addUploadedSong(s); };
+    songsPage.onSongRemoved      = [this](const Song& s) { songLibrary.remove(s.filePath); };
+
+    //brings back everything uploaded in earlier runs
+    juce::Array<Song> savedSongs;
+    for (const auto& info : songLibrary.getSongs())
+        savedSongs.add(toSong(info));
+    songsPage.addSongs(savedSongs);
 
     songsPage.getPlaylistsForSong = [this](const Song& s)
     {
@@ -71,6 +111,9 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    if (isTimerRunning())
+        timerCallback(); //dont lose a slider change made right before closing
+
     sidebar.setPageContent(nullptr);
     setLookAndFeel(nullptr);
 }
@@ -85,6 +128,38 @@ void MainComponent::showMixingPage(Playlist* playlist, int songIndex)
 {
     mixingPage.setContent(playlist, songIndex);
     showPage(mixingPage);
+}
+
+void MainComponent::addUploadedSong(const Song& song)
+{
+    //songs typed in without a file have no audio to save settings for
+    if (song.filePath.isNotEmpty())
+    {
+        //reading the whole song for bpm and loudness can take a second so show the loading cursor
+        juce::MouseCursor::showWaitCursor();
+        auto info = SongData::readSong(audioEngine.getFormats(), juce::File(song.filePath));
+        juce::MouseCursor::hideWaitCursor();
+
+        //whatever was typed in the dialog wins over the tags
+        info.title   = song.title;
+        info.artist  = song.artist;
+        info.album   = song.album;
+        info.addedAt = song.dateAdded.toISO8601(true);
+
+        if (!songLibrary.save(info))
+            juce::AlertWindow::showMessageBoxAsync(
+                juce::MessageBoxIconType::WarningIcon,
+                "Unable to save song",
+                "Could not write to " + songLibrary.getFile().getFullPathName());
+    }
+
+    songsPage.addSongs({ song });
+}
+
+void MainComponent::timerCallback()
+{
+    stopTimer();
+    songLibrary.writeToDisk();
 }
 
 void MainComponent::showPage(juce::Component& page)

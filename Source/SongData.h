@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include "SongSettings.h"
 
 //everything we know about one uploaded song
 struct SongInfo
@@ -26,6 +27,7 @@ struct SongInfo
     int channels = 0;
     int bitrate = 0;            //kbps
     juce::String addedAt;
+    SongSettings settings;      //this songs own speed, volume, gain and eq
 
     juce::String formatLength() const
     {
@@ -66,6 +68,7 @@ struct SongInfo
         obj->setProperty("channels", channels);
         obj->setProperty("bitrate", bitrate);
         obj->setProperty("addedAt", addedAt);
+        obj->setProperty("settings", settings.toVar());
         return juce::var(obj);
     }
 
@@ -86,6 +89,7 @@ struct SongInfo
         info.channels = (int)v.getProperty("channels", 0);
         info.bitrate = (int)v.getProperty("bitrate", 0);
         info.addedAt = v.getProperty("addedAt", "").toString();
+        info.settings = SongSettings::fromVar(v.getProperty("settings", juce::var()));
         return info;
     }
 };
@@ -101,15 +105,15 @@ namespace SongData
     inline double estimateBpm(const std::vector<float>& onsets, double framesPerSecond)
     {
         const double minBpm = 70.0, maxBpm = 180.0;
-        int minLag = (int)std::floor(framesPerSecond * 60.0 / maxBpm);
-        int maxLag = (int)std::ceil(framesPerSecond * 60.0 / minBpm);
+        size_t minLag = (size_t)std::floor(framesPerSecond * 60.0 / maxBpm);
+        size_t maxLag = (size_t)std::ceil(framesPerSecond * 60.0 / minBpm);
 
-        if (minLag < 1 || (int)onsets.size() < maxLag * 4)
+        if (minLag < 1 || onsets.size() < maxLag * 4)
             return 0.0; //song too short to say anything useful
 
         //autocorrelation: how well does the onset pattern line up with itself shifted by "lag" frames
         std::vector<double> scores(maxLag + 2, 0.0);
-        for (int lag = minLag - 1; lag <= maxLag + 1; ++lag)
+        for (size_t lag = minLag - 1; lag <= maxLag + 1; ++lag)
         {
             double sum = 0.0;
             for (size_t i = 0; i + lag < onsets.size(); ++i)
@@ -117,8 +121,8 @@ namespace SongData
             scores[lag] = sum / (double)(onsets.size() - lag);
         }
 
-        int best = minLag;
-        for (int lag = minLag; lag <= maxLag; ++lag)
+        size_t best = minLag;
+        for (size_t lag = minLag; lag <= maxLag; ++lag)
             if (scores[lag] > scores[best])
                 best = lag;
 
@@ -130,7 +134,7 @@ namespace SongData
         double denom = a - 2.0 * b + c;
         double offset = denom != 0.0 ? 0.5 * (a - c) / denom : 0.0;
 
-        return 60.0 * framesPerSecond / (best + offset);
+        return 60.0 * framesPerSecond / ((double)best + offset);
     }
 
     //reads the whole file once with JUCE to get loudness and an onset envelope for bpm
@@ -198,8 +202,9 @@ namespace SongData
         }
     }
 
-    //TagLib gives us the tags (title, artist, bpm) and JUCE fills in the rest
-    inline SongInfo readSong(juce::AudioFormatManager& formats, const juce::File& file)
+    //TagLib gives us the tags (title, artist, bpm) and the length, JUCE covers the length if TagLib cant
+    //this never decodes the audio so its quick enough to run while the app is waiting on a click
+    inline SongInfo readDetails(juce::AudioFormatManager& formats, const juce::File& file)
     {
         SongInfo info;
         info.path = file.getFullPathName();
@@ -244,6 +249,20 @@ namespace SongData
         if (info.artist.isEmpty())
             info.artist = "Unknown Artist";
 
+        if (info.lengthSeconds <= 0.0)
+        {
+            std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
+            if (reader && reader->sampleRate > 0.0)
+                info.lengthSeconds = (double)reader->lengthInSamples / reader->sampleRate;
+        }
+
+        return info;
+    }
+
+    //everything from readDetails plus loudness and an estimated bpm, slow because it reads the whole song
+    inline SongInfo readSong(juce::AudioFormatManager& formats, const juce::File& file)
+    {
+        SongInfo info = readDetails(formats, file);
         analyseAudio(formats, file, info);
         return info;
     }
@@ -301,8 +320,12 @@ public:
     }
 
     //adds the song, or replaces it if the same file was uploaded before, then writes the file
-    bool save(const SongInfo& song)
+    //a replaced song keeps its playback controls so uploading it again doesnt reset them
+    bool save(SongInfo song)
     {
+        if (const SongInfo* existing = findByPath(song.path))
+            song.settings = existing->settings;
+
         songs.erase(std::remove_if(songs.begin(), songs.end(),
                                    [&](const SongInfo& s) { return s.path == song.path; }),
                     songs.end());
@@ -311,7 +334,31 @@ public:
         return writeToDisk();
     }
 
-private:
+    //forgets a song so it doesnt come back next run
+    bool remove(const juce::String& path)
+    {
+        songs.erase(std::remove_if(songs.begin(), songs.end(),
+                                   [&](const SongInfo& s) { return s.path == path; }),
+                    songs.end());
+
+        return writeToDisk();
+    }
+
+    //changes a songs playback controls in memory, false if that file isnt in the library
+    //sliders change these constantly so this doesnt touch the file, call writeToDisk when they settle
+    bool setSettings(const juce::String& path, const SongSettings& settings)
+    {
+        for (auto& song : songs)
+        {
+            if (song.path == path)
+            {
+                song.settings = settings;
+                return true;
+            }
+        }
+        return false;
+    }
+
     bool writeToDisk() const
     {
         juce::Array<juce::var> list;
@@ -326,6 +373,7 @@ private:
         return libraryFile.replaceWithText(juce::JSON::toString(juce::var(root)));
     }
 
+private:
     juce::File libraryFile;
     std::vector<SongInfo> songs;
 };

@@ -90,9 +90,23 @@ void SongsPage::rebuildList()
     resized();
 }
 
-void SongsPage::handleAddSong(Song s)
+void SongsPage::addSongs(juce::Array<Song> newSongs)
 {
-    songs.insert(0, std::move(s));
+    for (auto& s : newSongs)
+    {
+        // Uploading the same file again replaces its row and keeps its transitions.
+        for (int i = songs.size(); --i >= 0;)
+        {
+            if (s.filePath.isNotEmpty() && songs.getReference(i).filePath == s.filePath)
+            {
+                s.transitions = songs.getReference(i).transitions;
+                songs.remove(i);
+            }
+        }
+
+        songs.insert(0, s);
+    }
+
     rebuildList();
 }
 
@@ -110,6 +124,7 @@ void SongsPage::handleDeleteRequest(int index)
         {
             if (result == 1)
             {
+                if (onSongRemoved) onSongRemoved(songs[index]);
                 songs.remove(index);
                 rebuildList();
             }
@@ -119,7 +134,8 @@ void SongsPage::handleDeleteRequest(int index)
 void SongsPage::showAddSongDialog()
 {
     auto* content = new AddSongDialog();
-    content->onCreated = [this](Song s) { handleAddSong(std::move(s)); };
+    content->readSongDetails = readSongDetails;
+    content->onCreated = [this](Song s) { if (onNewSong) onNewSong(s); };
 
     juce::DialogWindow::LaunchOptions opts;
     opts.content.setOwned(content);

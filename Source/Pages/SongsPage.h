@@ -15,11 +15,19 @@ public:
     // Set by MainComponent so the detail dialog can query playlist membership.
     std::function<juce::StringArray(const Song&)> getPlaylistsForSong;
 
+    // FRONTEND/BACKEND INTEGRATION: Set by MainComponent to reach the song library.
+    std::function<Song(const juce::File&)> readSongDetails;
+    std::function<void(const Song&)>       onNewSong;
+    std::function<void(const Song&)>       onSongRemoved;
+
     SongsPage();
     void paint(juce::Graphics& g) override;
     void resized() override;
 
     const juce::Array<Song>& getSongs() const { return songs; }
+
+    // Adds songs to the top of the list, last one first.
+    void addSongs(juce::Array<Song> newSongs);
 
     juce::Array<Transition> getTransitionsForPair(const juce::String& s1,
                                                    const juce::String& s2) const;
@@ -40,7 +48,6 @@ private:
     SongsSidebarContent sidebarContent;
 
     void rebuildList();
-    void handleAddSong(Song s);
     void handleDeleteRequest(int index);
     void showAddSongDialog();
     void showSongDetail(int index);

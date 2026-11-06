@@ -5,17 +5,21 @@
 #include "Transition.h"
 #include "SongChartComponent.h"
 #include "SongsSidebarContent.h"
+#include "../SongSettings.h"
 
 class MixingPage : public juce::Component
 {
 public:
     std::function<juce::Array<Transition>(juce::String, juce::String)> getTransitionsForPair;
 
-    std::function<bool(const Song&)> onPlaySong;
+    std::function<bool(const Song&, const SongSettings&)> onPlaySong;
     std::function<void()> onPause;
     std::function<void()> onResume;
     std::function<void()> onStop;
-    std::function<void(float)> onVolumeChanged;
+
+    // FRONTEND/BACKEND INTEGRATION: Each song keeps its own slider positions
+    std::function<SongSettings(const Song&)> getSongSettings;
+    std::function<void(const Song&, const SongSettings&)> onSongSettingsChanged;
 
     MixingPage();
 
@@ -48,6 +52,8 @@ private:
     juce::Label  controlsHeader { {}, "CONTROLS" };
     juce::Label  volumeLabel    { {}, "Volume" };
     juce::Slider volumeSlider;
+    juce::Label  gainLabel      { {}, "Gain" };
+    juce::Slider gainSlider;
     juce::Label  pitchLabel     { {}, "Pitch" };
     juce::Slider pitchSlider;
     juce::Label  speedLabel     { {}, "Speed" };
@@ -62,11 +68,19 @@ private:
     juce::Label  bassLabel      { {}, "Bass" };
     juce::Slider bassSlider;
 
+    // The sliders saved per song. Pitch isn't connected to the audio yet.
+    juce::Array<juce::Slider*> songSliders;
+
     SongsSidebarContent sidebarContent;
     int sepY = 0;
 
-    void setupSlider(juce::Slider& s, double min, double max, double defaultVal);
+    void setupSlider(juce::Slider& s, double min, double max, double defaultVal,
+                     const juce::String& suffix, int decimals);
     void showTransitionPresets();
+
+    const Song*  getCurrentSong() const;
+    SongSettings getSliderSettings() const;
+    void         loadSongSettings();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MixingPage)
 };

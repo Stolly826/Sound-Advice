@@ -18,6 +18,10 @@ public:
     // Provide the full song library so the pick-song dialog can list them.
     std::function<juce::Array<Song>()> getAllSongs;
 
+    // FRONTEND/BACKEND INTEGRATION: Set by MainComponent to reach the song library.
+    std::function<Song(const juce::File&)> readSongDetails;
+    std::function<void(const Song&)>       onNewSong;
+
     PlaylistDetailPage();
     void setPlaylist(Playlist* playlist);
 

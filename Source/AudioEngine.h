@@ -4,7 +4,42 @@
 // This replaces the separate Win32-specific AudioEngine in deployment-prototype.
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_formats/juce_audio_formats.h>
+#include <atomic>
 #include <memory>
+#include "SongSettings.h"
+
+// Speed and EQ stages that sit between the transport and the speakers.
+// The setters are safe to call from the UI while audio is playing.
+class SongEffectsSource : public juce::AudioSource
+{
+public:
+    explicit SongEffectsSource(juce::AudioSource& input);
+
+    void setSpeed(double newSpeed);
+    void setEq(double newBassDb, double newMidsDb, double newTrebleDb);
+
+    void prepareToPlay(int samplesPerBlockExpected, double sampleRate) override;
+    void releaseResources() override;
+    void getNextAudioBlock(const juce::AudioSourceChannelInfo& info) override;
+
+private:
+    enum Band { bass, mids, treble, numBands };
+    static constexpr int kNumChannels = 2;
+
+    juce::ResamplingAudioSource resampler;
+    juce::IIRFilter filters[kNumChannels][numBands];
+
+    std::atomic<double> speed { 1.0 };
+    std::atomic<double> bassDb { 0.0 };
+    std::atomic<double> midsDb { 0.0 };
+    std::atomic<double> trebleDb { 0.0 };
+    std::atomic<bool> eqChanged { true };
+    double currentSampleRate = 0.0;
+
+    void updateFilters();
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SongEffectsSource)
+};
 
 class AudioEngine
 {
@@ -21,12 +56,17 @@ public:
     void pause();
     void resume(); // FRONTEND/BACKEND INTEGRATION: Dedicated Resume button
     void stop();
-    void setVolume(float gain);
+
+    // FRONTEND/BACKEND INTEGRATION: Speed, volume, gain and EQ for the current song
+    void applySettings(const SongSettings& settings);
+
+    juce::AudioFormatManager& getFormats() { return formatManager; }
 
 private:
     juce::AudioFormatManager formatManager;
     std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
     juce::AudioTransportSource transport;
+    SongEffectsSource effects { transport };
     juce::AudioSourcePlayer audioPlayer;
     juce::AudioDeviceManager deviceManager;
     juce::String deviceError;

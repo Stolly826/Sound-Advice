@@ -3,6 +3,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "SoundAdviceLookAndFeel.h"
 #include "AudioEngine.h"
+#include "SongData.h"
 #include "Sidebar.h"
 #include "Pages/MainMenuPage.h"
 #include "Pages/PlaylistsPage.h"
@@ -14,7 +15,8 @@
 // Root UI component. Owns the sidebar and all pages.
 // Exactly one page is visible at a time; showPage() handles switching
 // and shows/hides the sidebar accordingly.
-class MainComponent : public juce::Component
+class MainComponent : public juce::Component,
+                      private juce::Timer
 {
 public:
     MainComponent();
@@ -27,6 +29,7 @@ private:
     SoundAdviceLookAndFeel lookAndFeel; // destroyed last
 
     AudioEngine audioEngine; //the audio engine thats shared by the front end
+    SongLibrary songLibrary; //every uploaded song and its settings, kept in library.json
 
     Sidebar            sidebar;
     MainMenuPage       mainMenuPage;
@@ -39,6 +42,8 @@ private:
     void showPage(juce::Component& page);
     void showPlaylistDetail(Playlist* playlist);
     void showMixingPage(Playlist* playlist, int songIndex);
+    void addUploadedSong(const Song& song);
+    void timerCallback() override;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };
