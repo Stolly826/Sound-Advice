@@ -55,6 +55,29 @@ MainComponent::MainComponent()
         {
             audioEngine.setVolume(gain);
         };
+    mixingPage.onSpeedChanged = [this](double speed)
+        {
+            audioEngine.setPlaybackSpeed(speed);
+        };
+    mixingPage.onBassChanged = [this](float db)
+        {
+            audioEngine.setBass(db);
+        };
+
+    mixingPage.onMidsChanged = [this](float db)
+        {
+            audioEngine.setMids(db);
+        };
+
+    mixingPage.onTrebleChanged = [this](float db)
+        {
+            audioEngine.setTreble(db);
+        };
+
+    mixingPage.onScratch = [this](double offsetSeconds)
+        {
+            audioEngine.scratch(offsetSeconds);
+        };
 
     //starting volume is set at 75%
     audioEngine.setVolume(0.75f);

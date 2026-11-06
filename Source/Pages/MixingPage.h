@@ -16,6 +16,11 @@ public:
     std::function<void()> onResume;
     std::function<void()> onStop;
     std::function<void(float)> onVolumeChanged;
+    std::function<void(double)> onSpeedChanged;
+    std::function<void(float)> onBassChanged;
+    std::function<void(float)> onMidsChanged;
+    std::function<void(float)> onTrebleChanged;
+    std::function<void(double)> onScratch;
 
     MixingPage();
 
@@ -61,6 +66,9 @@ private:
     juce::Slider midsSlider;
     juce::Label  bassLabel      { {}, "Bass" };
     juce::Slider bassSlider;
+    juce::Slider scratchSlider;
+    //how far slider moved
+    double previousScratchValue = 0.0;
 
     SongsSidebarContent sidebarContent;
     int sepY = 0;

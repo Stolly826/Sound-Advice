@@ -81,9 +81,56 @@ MixingPage::MixingPage()
         };
     setupSlider(pitchSlider,  -12.0,  12.0,   0.0);
     setupSlider(speedSlider,   50.0, 150.0, 100.0);
+    speedSlider.onValueChange = [this]
+    {
+        if (onSpeedChanged)
+            onSpeedChanged(speedSlider.getValue() / 100.0);
+    };
     setupSlider(trebleSlider, -12.0,  12.0,   0.0);
     setupSlider(midsSlider,   -12.0,  12.0,   0.0);
     setupSlider(bassSlider,   -12.0,  12.0,   0.0);
+    bassSlider.onValueChange = [this]
+        {
+            if (onBassChanged)
+                onBassChanged(static_cast<float>(bassSlider.getValue()));
+        };
+
+    midsSlider.onValueChange = [this]
+        {
+            if (onMidsChanged)
+                onMidsChanged(static_cast<float>(midsSlider.getValue()));
+        };
+
+    trebleSlider.onValueChange = [this]
+        {
+            if (onTrebleChanged)
+                onTrebleChanged(static_cast<float>(trebleSlider.getValue()));
+        };
+    //scratch slider
+    scratchSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    scratchSlider.setRange(-2.0, 2.0, 0.05);
+    scratchSlider.setValue(0.0, juce::dontSendNotification);
+    scratchSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 80, 24);
+    scratchSlider.setTextValueSuffix(" sec");
+    scratchSlider.setTooltip("Scratch: drag left or right");
+    addAndMakeVisible(scratchSlider);
+
+    scratchSlider.onValueChange = [this]
+        {
+            double newValue = scratchSlider.getValue();
+            double difference = newValue - previousScratchValue;
+
+            if (onScratch)
+                onScratch(difference);
+
+            previousScratchValue = newValue;
+        };
+
+    scratchSlider.onDragEnd = [this]
+        {
+            scratchSlider.setValue(0.0, juce::dontSendNotification);
+            previousScratchValue = 0.0;
+        };
 }
 
 void MixingPage::setupSlider(juce::Slider& s, double min, double max, double def)
@@ -216,7 +263,13 @@ void MixingPage::resized()
     // Transition Presets button — right-aligned in the gap row
     {
         auto row = area.removeFromTop(26);
+
         transitionPresetsButton.setBounds(row.removeFromRight(162));
+
+        row.removeFromRight(12); //spacing between controls
+
+        scratchSlider.setBounds(row.removeFromLeft(
+            juce::jmin(260, row.getWidth())));
     }
     area.removeFromTop(6);
 
