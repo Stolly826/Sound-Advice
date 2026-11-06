@@ -9,7 +9,7 @@ AudioEngine::AudioEngine()
     deviceError = deviceManager.initialiseWithDefaultDevices(0, 2);
     if (deviceError.isEmpty())
     {
-        audioPlayer.setSource(&transport);
+        audioPlayer.setSource(&speedResampler); //sending audio through resampler scrum37
         deviceManager.addAudioCallback(&audioPlayer);
     }
 }
@@ -87,4 +87,11 @@ void AudioEngine::stop()
 void AudioEngine::setVolume(float gain)
 {
     transport.setGain(juce::jlimit(0.0f, 1.0f, gain));
+}
+
+void AudioEngine::setPlaybackSpeed(double speedMultiplier)
+{
+    //parameters for the speed so it stays between 0.5 and 1.5
+    speedMultiplier = juce::jlimit(0.5, 1.5, speedMultiplier);
+    speedResampler.setResamplingRatio(speedMultiplier);
 }

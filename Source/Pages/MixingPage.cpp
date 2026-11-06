@@ -81,6 +81,11 @@ MixingPage::MixingPage()
         };
     setupSlider(pitchSlider,  -12.0,  12.0,   0.0);
     setupSlider(speedSlider,   50.0, 150.0, 100.0);
+    speedSlider.onValueChange = [this]
+    {
+        if (onSpeedChanged)
+            onSpeedChanged(speedSlider.getValue() / 100.0);
+    };
     setupSlider(trebleSlider, -12.0,  12.0,   0.0);
     setupSlider(midsSlider,   -12.0,  12.0,   0.0);
     setupSlider(bassSlider,   -12.0,  12.0,   0.0);

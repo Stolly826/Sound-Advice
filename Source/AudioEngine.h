@@ -22,12 +22,14 @@ public:
     void resume(); // FRONTEND/BACKEND INTEGRATION: Dedicated Resume button
     void stop();
     void setVolume(float gain);
+    void setPlaybackSpeed(double speedMultiplier);
 
 private:
     juce::AudioFormatManager formatManager;
     std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
     juce::AudioTransportSource transport;
     juce::AudioSourcePlayer audioPlayer;
+    juce::ResamplingAudioSource speedResampler{ &transport, false, 2 };
     juce::AudioDeviceManager deviceManager;
     juce::String deviceError;
     juce::String loadedFilePath;

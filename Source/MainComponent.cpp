@@ -55,6 +55,10 @@ MainComponent::MainComponent()
         {
             audioEngine.setVolume(gain);
         };
+    mixingPage.onSpeedChanged = [this](double speed)
+        {
+            audioEngine.setPlaybackSpeed(speed);
+        };
 
     //starting volume is set at 75%
     audioEngine.setVolume(0.75f);

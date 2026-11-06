@@ -16,6 +16,7 @@ public:
     std::function<void()> onResume;
     std::function<void()> onStop;
     std::function<void(float)> onVolumeChanged;
+    std::function<void(double)> onSpeedChanged;
 
     MixingPage();
 
