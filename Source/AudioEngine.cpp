@@ -140,3 +140,23 @@ void AudioEngine::setTreble(float decibels)
         juce::IIRCoefficients::makeHighShelf(
             device->getCurrentSampleRate(), 4000.0, 0.707, gain));
 }
+//scratch stuff
+void AudioEngine::scratch(double offsetSeconds)
+{
+    //make sure song is loaded
+    if (!readerSource)
+        return;
+
+    double songLength = transport.getLengthInSeconds();
+    if (songLength <= 0.0)
+        return;
+
+    //showing where to move
+    double newPosition = transport.getCurrentPosition() + offsetSeconds;
+
+    //stays within bounds of the song
+    newPosition = juce::jlimit(0.0, songLength, newPosition);
+
+    //move playback
+    transport.setPosition(newPosition);
+}

@@ -27,6 +27,7 @@ public:
     void setBass(float decibels);
     void setMids(float decibels);
     void setTreble(float decibels);
+    void scratch(double offsetSeconds);
 
 private:
     juce::AudioFormatManager formatManager;

@@ -74,6 +74,11 @@ MainComponent::MainComponent()
             audioEngine.setTreble(db);
         };
 
+    mixingPage.onScratch = [this](double offsetSeconds)
+        {
+            audioEngine.scratch(offsetSeconds);
+        };
+
     //starting volume is set at 75%
     audioEngine.setVolume(0.75f);
 
