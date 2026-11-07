@@ -31,7 +31,9 @@ MixingPage::MixingPage()
             const auto& song = currentPlaylist->songs[currentIndex];
 
             // Ask MainComponent to play the selected audio file
-            if (!onPlaySong || !onPlaySong(song))
+            if (!onPlaySong || !onPlaySong(song,
+                                           incomingFadeInStart, incomingFadeInEnd,
+                                           chart1.getFadeStart(), chart1.getFadeEnd()))
                 juce::AlertWindow::showMessageBoxAsync(
                     juce::MessageBoxIconType::WarningIcon,
                     "Unable to play song",
@@ -146,9 +148,16 @@ void MixingPage::setupSlider(juce::Slider& s, double min, double max, double def
 
 void MixingPage::setContent(Playlist* playlist, int songIndex)
 {
+    const bool advancingToNext = playlist != nullptr && playlist == currentPlaylist
+                             && songIndex == currentIndex + 1;
+    const float nextFadeInStart = chart2.getFadeStart();
+    const float nextFadeInEnd = chart2.getFadeEnd();
+
     if (onStop) onStop();
     currentPlaylist = playlist;
     currentIndex    = songIndex;
+    incomingFadeInStart = -1.0f;
+    incomingFadeInEnd   = -1.0f;
 
     // Reset editable state when loading new content
     chart1.setEditable(true);
@@ -159,6 +168,23 @@ void MixingPage::setContent(Playlist* playlist, int songIndex)
         const auto& songs  = playlist->songs;
         const bool hasCurr = songIndex >= 0 && songIndex < songs.size();
         const bool hasNext = songIndex + 1 < songs.size();
+
+        if (hasCurr && advancingToNext && nextFadeInStart >= 0.0f
+            && nextFadeInEnd > nextFadeInStart)
+        {
+            incomingFadeInStart = nextFadeInStart;
+            incomingFadeInEnd = nextFadeInEnd;
+        }
+        else if (hasCurr && songIndex > 0 && getTransitionsForPair)
+        {
+            const auto incomingTransitions = getTransitionsForPair(
+                songs[songIndex - 1].title, songs[songIndex].title);
+            if (!incomingTransitions.isEmpty())
+            {
+                incomingFadeInStart = incomingTransitions[0].fadeInStart;
+                incomingFadeInEnd = incomingTransitions[0].fadeInEnd;
+            }
+        }
 
         chart1.setSongName    (hasCurr ? songs[songIndex].title             : juce::String{});
         chart2.setSongName    (hasNext ? songs[songIndex + 1].title         : juce::String{});

@@ -1,6 +1,7 @@
 #include "AudioEngine.h"
 
 AudioEngine::AudioEngine()
+    : fadeSource(trebleFilter, transport)
 {
     // FRONTEND/BACKEND INTEGRATION: Recognise WAV, MP3, and other JUCE formats.
     formatManager.registerBasicFormats();
@@ -12,7 +13,7 @@ AudioEngine::AudioEngine()
         setBass(0.0f);
         setMids(0.0f);
         setTreble(0.0f);
-        audioPlayer.setSource(&trebleFilter); //sending audio through resampler scrum37
+        audioPlayer.setSource(&fadeSource);
         deviceManager.addAudioCallback(&audioPlayer);
     }
 }
@@ -29,10 +30,14 @@ AudioEngine::~AudioEngine()
     deviceManager.closeAudioDevice();
 }
 
-bool AudioEngine::playSong(const juce::File& file)
+bool AudioEngine::playSong(const juce::File& file,
+                           float fadeInStart, float fadeInEnd,
+                           float fadeOutStart, float fadeOutEnd)
 {
     if (!isReady() || !file.existsAsFile())
         return false;
+
+    fadeSource.setFadePoints(fadeInStart, fadeInEnd, fadeOutStart, fadeOutEnd);
 
     if (loadedFilePath != file.getFullPathName())
     {
@@ -59,6 +64,67 @@ bool AudioEngine::playSong(const juce::File& file)
     transport.start();
     paused = false; // Play also resumes if already paused.
     return true;
+}
+
+void FadeEnvelopeAudioSource::setFadePoints(float inStart, float inEnd,
+                                             float outStart, float outEnd)
+{
+    fadeInStart.store(inStart, std::memory_order_relaxed);
+    fadeInEnd.store(inEnd, std::memory_order_relaxed);
+    fadeOutStart.store(outStart, std::memory_order_relaxed);
+    fadeOutEnd.store(outEnd, std::memory_order_relaxed);
+}
+
+void FadeEnvelopeAudioSource::prepareToPlay(int samplesPerBlockExpected, double sampleRate)
+{
+    input.prepareToPlay(samplesPerBlockExpected, sampleRate);
+}
+
+void FadeEnvelopeAudioSource::releaseResources()
+{
+    input.releaseResources();
+}
+
+void FadeEnvelopeAudioSource::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
+{
+    if (info.buffer == nullptr || info.numSamples <= 0)
+        return;
+
+    const double positionAtStart = transport.getCurrentPosition();
+    input.getNextAudioBlock(info);
+    const double positionAtEnd = transport.getCurrentPosition();
+    const double duration = transport.getLengthInSeconds();
+    if (duration <= 0.0)
+        return;
+
+    const float inStart = fadeInStart.load(std::memory_order_relaxed);
+    const float inEnd = fadeInEnd.load(std::memory_order_relaxed);
+    const float outStart = fadeOutStart.load(std::memory_order_relaxed);
+    const float outEnd = fadeOutEnd.load(std::memory_order_relaxed);
+    const bool hasFadeIn = inStart >= 0.0f && inEnd > inStart && inEnd <= 1.0f;
+    const bool hasFadeOut = outStart >= 0.0f && outEnd > outStart && outEnd <= 1.0f;
+    if (!hasFadeIn && !hasFadeOut)
+        return;
+
+    const double positionDelta = positionAtEnd - positionAtStart;
+    const int lastSample = juce::jmax(1, info.numSamples - 1);
+    for (int sample = 0; sample < info.numSamples; ++sample)
+    {
+        const float songProgress = static_cast<float>(
+            juce::jlimit(0.0, 1.0,
+                (positionAtStart + positionDelta * sample / lastSample) / duration));
+
+        float gain = 1.0f;
+        if (hasFadeIn)
+            gain *= juce::jlimit(0.0f, 1.0f,
+                (songProgress - inStart) / (inEnd - inStart));
+        if (hasFadeOut)
+            gain *= 1.0f - juce::jlimit(0.0f, 1.0f,
+                (songProgress - outStart) / (outEnd - outStart));
+
+        for (int channel = 0; channel < info.buffer->getNumChannels(); ++channel)
+            info.buffer->getWritePointer(channel, info.startSample)[sample] *= gain;
+    }
 }
 
 void AudioEngine::pause()

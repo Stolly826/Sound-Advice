@@ -5,7 +5,29 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_dsp/juce_dsp.h>
+#include <atomic>
 #include <memory>
+
+class FadeEnvelopeAudioSource final : public juce::AudioSource
+{
+public:
+    FadeEnvelopeAudioSource(juce::AudioSource& inputSource,
+                            juce::AudioTransportSource& audioTransport)
+        : input(inputSource), transport(audioTransport) {}
+
+    void setFadePoints(float inStart, float inEnd, float outStart, float outEnd);
+    void prepareToPlay(int samplesPerBlockExpected, double sampleRate) override;
+    void releaseResources() override;
+    void getNextAudioBlock(const juce::AudioSourceChannelInfo& info) override;
+
+private:
+    juce::AudioSource& input;
+    juce::AudioTransportSource& transport;
+    std::atomic<float> fadeInStart { -1.0f };
+    std::atomic<float> fadeInEnd   { -1.0f };
+    std::atomic<float> fadeOutStart { -1.0f };
+    std::atomic<float> fadeOutEnd   { -1.0f };
+};
 
 class AudioEngine
 {
@@ -18,7 +40,9 @@ public:
 
     // Load a different file when necessary, then play. Pressing Play after
     // Pause resumes because stopping the transport preserves its position.
-    bool playSong(const juce::File& file);
+    bool playSong(const juce::File& file,
+                  float fadeInStart = -1.0f, float fadeInEnd = -1.0f,
+                  float fadeOutStart = -1.0f, float fadeOutEnd = -1.0f);
     void pause();
     void resume(); // FRONTEND/BACKEND INTEGRATION: Dedicated Resume button
     void stop();
@@ -38,6 +62,7 @@ private:
     juce::IIRFilterAudioSource midsFilter{ &bassFilter, false };
     juce::IIRFilterAudioSource trebleFilter{ &midsFilter, false };
     juce::ResamplingAudioSource speedResampler{ &transport, false, 2 };
+    FadeEnvelopeAudioSource fadeSource;
     juce::AudioDeviceManager deviceManager;
     juce::String deviceError;
     juce::String loadedFilePath;
