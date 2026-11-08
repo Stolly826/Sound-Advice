@@ -88,8 +88,9 @@ void SongChartComponent::OverlayButton::paintButton(juce::Graphics& g,
 // ── Construction ──────────────────────────────────────────────────────────────
 SongChartComponent::SongChartComponent()
 {
-    loopReturnButton.onClick = [] { /* TODO: return to loop point */ };
-    skipButton.onClick       = [] { /* TODO: skip to next song */ };
+    // loop return jumps to the loop marker if one is set
+    loopReturnButton.onClick = [this] { if (loopPoint >= 0.0f && onJumpTo) onJumpTo(loopPoint); };
+    skipButton.onClick       = [this] { if (onSkip) onSkip(); };
     addAndMakeVisible(loopReturnButton);
     addAndMakeVisible(skipButton);
 
@@ -114,6 +115,12 @@ void SongChartComponent::setSongDuration(int seconds)
 {
     durationSeconds = seconds;
     repaint();
+}
+
+void SongChartComponent::setPlayhead(float position)
+{
+    // only repaint when it moved
+    if (! juce::exactlyEqual(position, playhead)) { playhead = position; repaint(); }
 }
 
 void SongChartComponent::setIsNextSong(bool isNext)
@@ -207,8 +214,9 @@ void SongChartComponent::mouseExit(const juce::MouseEvent&)
 
 void SongChartComponent::mouseDown(const juce::MouseEvent& e)
 {
-    if (!isEditable) return;
     if (!getChartArea().contains(e.x, e.y)) return;
+    // jump to stays available after a preset locks the markers
+    if (!isEditable && isNextSong) return;
 
     const auto  ca = getChartArea();
     const float t  = juce::jlimit(0.0f, 1.0f,
@@ -225,9 +233,9 @@ void SongChartComponent::mouseDown(const juce::MouseEvent& e)
     else
     {
         menu.addItem(1, "Jump To");
-        menu.addItem(2, "Set Loop");
-        menu.addItem(3, "Start Fade Out");
-        menu.addItem(4, "End Fade Out");
+        menu.addItem(2, "Set Loop",       isEditable);
+        menu.addItem(3, "Start Fade Out", isEditable);
+        menu.addItem(4, "End Fade Out",   isEditable);
     }
 
     menu.showMenuAsync(
@@ -237,7 +245,10 @@ void SongChartComponent::mouseDown(const juce::MouseEvent& e)
         {
             switch (result)
             {
-                case 1: if (isNextSong) startPoint = t; break;
+                case 1:
+                    if (isNextSong) startPoint = t;
+                    else if (onJumpTo) onJumpTo(t); // start playing from here
+                    break;
                 case 2: loopPoint = t; break;
                 case 3: fadeStart = t; break;
                 case 4: fadeEnd   = t; break;
@@ -326,6 +337,14 @@ void SongChartComponent::paint(juce::Graphics& g)
     drawMarker(fadeStart,  juce::Colour(0xffFF8C00)); // orange — fade start
     drawMarker(fadeEnd,    juce::Colour(0xffFF4444)); // red   — fade end
 
+    // playhead
+    if (playhead >= 0.0f)
+    {
+        const float px = cx + playhead * cw;
+        g.setColour(juce::Colours::white);
+        g.fillRect(px - 1.0f, cy, 2.0f, ch);
+    }
+
     // ── Hover vertical line + wave dots ───────────────────────────────────
     if (hoverX >= 0)
     {
@@ -404,7 +423,9 @@ void SongChartComponent::paint(juce::Graphics& g)
         }
         else
         {
-            timeStr = "0:00 / " + total;
+            // show playback time when theres a playhead
+            const int nowSecs = playhead >= 0.0f ? juce::roundToInt(playhead * (float)durationSeconds) : 0;
+            timeStr = fmtTime(nowSecs) + " / " + total;
         }
 
         g.setColour(juce::Colours::white.withAlpha(0.45f));

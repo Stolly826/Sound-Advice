@@ -29,6 +29,13 @@ public:
     void setTreble(float decibels);
     void scratch(double offsetSeconds);
 
+    // playback info for the mixing page playhead jump to and skip
+    double getPosition() const { return transport.getCurrentPosition(); }  // seconds
+    double getLength() const   { return transport.getLengthInSeconds(); }  // seconds
+    bool   isPlaying() const   { return transport.isPlaying(); }
+    const juce::String& getLoadedFilePath() const { return loadedFilePath; }
+    void   setPosition(double seconds); // jump to a time in the song
+
 private:
     juce::AudioFormatManager formatManager;
     std::unique_ptr<juce::AudioFormatReaderSource> readerSource;

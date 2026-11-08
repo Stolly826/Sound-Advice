@@ -91,8 +91,21 @@ void SongRow::resized()
 
 void SongRow::mouseUp(const juce::MouseEvent& e)
 {
+    // a drag isnt a click
+    if (e.mouseWasDraggedSinceMouseDown()) return;
+
     if (!trashButton.getBounds().contains(e.getPosition()))
         if (onClicked) onClicked();
+}
+
+void SongRow::mouseDrag(const juce::MouseEvent& e)
+{
+    if (dragDescription.isVoid() || e.getDistanceFromDragStart() < 6) return;
+
+    // main component is the drag container it shows a picture of the row under the mouse
+    if (auto* container = juce::DragAndDropContainer::findParentDragContainerFor(this))
+        if (! container->isDragAndDropActive())
+            container->startDragging(dragDescription, this);
 }
 
 void SongRow::mouseEnter(const juce::MouseEvent&) { hovered = true;  repaint(); }

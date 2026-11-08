@@ -160,3 +160,11 @@ void AudioEngine::scratch(double offsetSeconds)
     //move playback
     transport.setPosition(newPosition);
 }
+// jump to a time used by jump to and loop return
+void AudioEngine::setPosition(double seconds)
+{
+    if (!readerSource)
+        return;
+
+    transport.setPosition(juce::jlimit(0.0, transport.getLengthInSeconds(), seconds));
+}

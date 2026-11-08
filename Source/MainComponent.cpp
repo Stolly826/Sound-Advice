@@ -23,6 +23,13 @@ MainComponent::MainComponent()
 
     playlistDetailPage.onSongClicked = [this](Playlist* p, int idx) { showMixingPage(p, idx); };
     playlistDetailPage.getAllSongs   = [this]() { return songsPage.getSongs(); };
+    // order changes and added songs get saved
+    playlistDetailPage.onPlaylistChanged = [this] { playlistsPage.playlistChanged(); };
+    playlistDetailPage.addSongToLibrary  = [this](Song& s) { return songsPage.addSongToLibrary(s); };
+    playlistDetailPage.onEditClicked     = [this](Playlist* p)
+    {
+        playlistsPage.showEditDialog(p, &playlistDetailPage, [this] { playlistDetailPage.refreshHeader(); });
+    };
     transitionsPage.getAllSongs           = [this]()                              { return songsPage.getSongs(); };
     transitionsPage.getTransitionsForPair = [this](juce::String s1, juce::String s2) { return songsPage.getTransitionsForPair(s1, s2); };
     transitionsPage.addTransitionToSong   = [this](juce::String s1, Transition t)    { songsPage.addTransitionToSong(s1, t); };
@@ -78,6 +85,13 @@ MainComponent::MainComponent()
         {
             audioEngine.scratch(offsetSeconds);
         };
+
+    // playhead jump to and skip read from the same engine
+    mixingPage.getPlaybackPosition = [this] { return audioEngine.getPosition(); };
+    mixingPage.getPlaybackLength   = [this] { return audioEngine.getLength(); };
+    mixingPage.isPlaybackActive    = [this] { return audioEngine.isPlaying(); };
+    mixingPage.getLoadedFilePath   = [this] { return audioEngine.getLoadedFilePath(); };
+    mixingPage.onSeek              = [this](double seconds) { audioEngine.setPosition(seconds); };
 
     //starting volume is set at 75%
     audioEngine.setVolume(0.75f);

@@ -81,6 +81,8 @@ target_sources(SoundAdvice PRIVATE
     Source/Pages/SongsPage.h
     Source/Pages/TransitionsPage.cpp
     Source/Pages/TransitionsPage.h
+    Source/MusicLibrary.cpp
+    Source/MusicLibrary.h
 )
 
 # Custom fonts: every .ttf/.otf in Resources/Fonts gets embedded into the exe.
