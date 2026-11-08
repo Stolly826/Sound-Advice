@@ -18,8 +18,35 @@ MixingPage::MixingPage()
 
     playButton.setButtonText("");
     playButton.getProperties().set("iconShape", "play");
-    playButton.onClick = [this] { togglePlay(); };
     addAndMakeVisible(playButton);
+
+    // FRONTEND/BACKEND INTEGRATION: Play the selected song using JUCE
+    playButton.onClick = [this]
+        {
+            // Make sure a valid song is selected from a playlist
+            if (currentPlaylist == nullptr ||
+                !juce::isPositiveAndBelow(currentIndex, currentPlaylist->songs.size()))
+                return;
+
+            const auto& song = currentPlaylist->songs[currentIndex];
+
+            // Ask MainComponent to play the selected audio file
+            if (!onPlaySong || !onPlaySong(song))
+                juce::AlertWindow::showMessageBoxAsync(
+                    juce::MessageBoxIconType::WarningIcon,
+                    "Unable to play song",
+                    "This song does not have a playable MP3 or WAV file.");
+        };
+
+    // FRONTEND/BACKEND INTEGRATION: Connect Pause, Resume, and Stop
+    pauseButton.onClick = [this] { if (onPause) onPause(); };
+    resumeButton.onClick = [this] { if (onResume) onResume(); };
+    stopButton.onClick = [this] { if (onStop) onStop(); };
+
+    // Make the new buttons visible in the frontend
+    addAndMakeVisible(pauseButton);
+    addAndMakeVisible(resumeButton);
+    addAndMakeVisible(stopButton);
 
     recordButton.setButtonText("");
     recordButton.getProperties().set("iconShape", "record");
@@ -49,17 +76,63 @@ MixingPage::MixingPage()
     }
 
     setupSlider(volumeSlider,   0.0, 100.0,  75.0);
+    volumeSlider.onValueChange = [this]
+        {
+            if (onVolumeChanged)
+                onVolumeChanged(static_cast<float>(volumeSlider.getValue() / 100.0));
+        };
     setupSlider(pitchSlider,  -12.0,  12.0,   0.0);
     setupSlider(speedSlider,   50.0, 150.0, 100.0);
+    speedSlider.onValueChange = [this]
+    {
+        if (onSpeedChanged)
+            onSpeedChanged(speedSlider.getValue() / 100.0);
+    };
     setupSlider(trebleSlider, -12.0,  12.0,   0.0);
     setupSlider(midsSlider,   -12.0,  12.0,   0.0);
     setupSlider(bassSlider,   -12.0,  12.0,   0.0);
+    bassSlider.onValueChange = [this]
+        {
+            if (onBassChanged)
+                onBassChanged(static_cast<float>(bassSlider.getValue()));
+        };
 
-    // volume slider is 0 to 100 player wants 0 to 1
-    volumeSlider.onValueChange = [this]
-    {
-        if (player != nullptr) player->setVolume((float)volumeSlider.getValue() / 100.0f);
-    };
+    midsSlider.onValueChange = [this]
+        {
+            if (onMidsChanged)
+                onMidsChanged(static_cast<float>(midsSlider.getValue()));
+        };
+
+    trebleSlider.onValueChange = [this]
+        {
+            if (onTrebleChanged)
+                onTrebleChanged(static_cast<float>(trebleSlider.getValue()));
+        };
+    //scratch slider
+    scratchSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    scratchSlider.setRange(-2.0, 2.0, 0.05);
+    scratchSlider.setValue(0.0, juce::dontSendNotification);
+    scratchSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 80, 24);
+    scratchSlider.setTextValueSuffix(" sec");
+    scratchSlider.setTooltip("Scratch: drag left or right");
+    addAndMakeVisible(scratchSlider);
+
+    scratchSlider.onValueChange = [this]
+        {
+            double newValue = scratchSlider.getValue();
+            double difference = newValue - previousScratchValue;
+
+            if (onScratch)
+                onScratch(difference);
+
+            previousScratchValue = newValue;
+        };
+
+    scratchSlider.onDragEnd = [this]
+        {
+            scratchSlider.setValue(0.0, juce::dontSendNotification);
+            previousScratchValue = 0.0;
+        };
 }
 
 void MixingPage::setupSlider(juce::Slider& s, double min, double max, double def)
@@ -75,6 +148,7 @@ void MixingPage::setupSlider(juce::Slider& s, double min, double max, double def
 
 void MixingPage::setContent(Playlist* playlist, int songIndex)
 {
+    if (onStop) onStop();
     currentPlaylist = playlist;
     currentIndex    = songIndex;
 
@@ -104,57 +178,44 @@ void MixingPage::setContent(Playlist* playlist, int songIndex)
         };
     }
 
-    loadCurrentSong();
+    resetPlayhead();
 }
 
 // ── Playback ──────────────────────────────────────────────────────────────────
+// play pause resume stop go through the teams audio engine
+// these add the playhead jump to skip and loop return on top
 
-void MixingPage::loadCurrentSong()
+bool MixingPage::currentSongIsLoaded() const
 {
-    songLoaded = false;
-    if (player == nullptr) return;
+    if (currentPlaylist == nullptr || ! juce::isPositiveAndBelow(currentIndex, currentPlaylist->songs.size()))
+        return false;
 
-    // stop whatever was playing before
-    player->pause();
-
-    if (currentPlaylist != nullptr && currentIndex >= 0 && currentIndex < currentPlaylist->songs.size())
-    {
-        const auto& song = currentPlaylist->songs[currentIndex];
-
-        // demo songs and songs added without a file have nothing to play
-        if (song.audioFile.existsAsFile() && player->loadFile(song.audioFile))
-        {
-            songLoaded = true;
-            player->setVolume((float)volumeSlider.getValue() / 100.0f);
-
-            // use the real length if the song didnt have one
-            if (song.durationSeconds <= 0)
-                chart1.setSongDuration(juce::roundToInt(player->getLengthInSeconds()));
-        }
-    }
-
-    playButton.setEnabled(songLoaded);
-    chart1.setPlayhead(songLoaded ? 0.0f : -1.0f);
-    updatePlayButton();
+    // engine still has the last song until play is pressed
+    const auto& path = currentPlaylist->songs[currentIndex].filePath;
+    return path.isNotEmpty() && getLoadedFilePath && getLoadedFilePath() == path;
 }
 
-void MixingPage::togglePlay()
+void MixingPage::resetPlayhead()
 {
-    if (! songLoaded) return;
-
-    if (player->isPlaying()) player->pause();
-    else                     player->play();
-
-    updatePlayButton();
+    // line at the start for songs with audio hidden for demo songs
+    const bool hasAudio = currentPlaylist != nullptr
+                       && juce::isPositiveAndBelow(currentIndex, currentPlaylist->songs.size())
+                       && currentPlaylist->songs[currentIndex].filePath.isNotEmpty();
+    chart1.setPlayhead(hasAudio ? 0.0f : -1.0f);
 }
 
 void MixingPage::jumpTo(float position)
 {
-    if (! songLoaded) return;
+    if (currentPlaylist == nullptr || ! juce::isPositiveAndBelow(currentIndex, currentPlaylist->songs.size()))
+        return;
 
+    // start the song if it isnt playing yet then move to the spot
     // position is 0 to 1 across the chart
-    player->playFrom(position * player->getLengthInSeconds());
-    updatePlayButton();
+    if (! onPlaySong || ! onPlaySong(currentPlaylist->songs[currentIndex]))
+        return;
+
+    if (onSeek && getPlaybackLength)
+        onSeek(position * getPlaybackLength());
 }
 
 void MixingPage::skipToNext()
@@ -162,50 +223,32 @@ void MixingPage::skipToNext()
     if (currentPlaylist == nullptr || currentIndex + 1 >= currentPlaylist->songs.size()) return;
 
     // keep playing if it was already playing
-    const bool wasPlaying = songLoaded && player->isPlaying();
-    setContent(currentPlaylist, currentIndex + 1);
+    const bool wasPlaying = currentSongIsLoaded() && isPlaybackActive && isPlaybackActive();
+    setContent(currentPlaylist, currentIndex + 1); // this stops the old song
 
-    if (wasPlaying && songLoaded)
-    {
-        player->play();
-        updatePlayButton();
-    }
-}
-
-void MixingPage::updatePlayButton()
-{
-    // pause icon while playing play icon otherwise
-    const juce::String shape = (songLoaded && player->isPlaying()) ? "pause" : "play";
-    if (playButton.getProperties()["iconShape"].toString() != shape)
-    {
-        playButton.getProperties().set("iconShape", shape);
-        playButton.repaint();
-    }
+    if (wasPlaying && onPlaySong)
+        onPlaySong(currentPlaylist->songs[currentIndex]);
 }
 
 void MixingPage::timerCallback()
 {
-    if (! songLoaded) return;
+    if (! currentSongIsLoaded() || ! getPlaybackPosition || ! getPlaybackLength) return;
 
-    const double length = player->getLengthInSeconds();
-    chart1.setPlayhead(length > 0.0 ? (float)(player->getPosition() / length) : 0.0f);
+    const double length = getPlaybackLength();
+    if (length <= 0.0) return;
 
-    // flips back to play when the song ends
-    updatePlayButton();
+    chart1.setPlayhead((float)(getPlaybackPosition() / length));
+
+    // use the real length if the song didnt have one
+    if (currentPlaylist->songs[currentIndex].durationSeconds <= 0)
+        chart1.setSongDuration(juce::roundToInt(length));
 }
 
 void MixingPage::visibilityChanged()
 {
-    // only update the playhead while the page is showing
-    // leaving the page pauses the song
-    if (isVisible())
-        startTimerHz(30);
-    else
-    {
-        stopTimer();
-        if (songLoaded) player->pause();
-        updatePlayButton();
-    }
+    // only move the playhead while the page is showing
+    if (isVisible()) startTimerHz(30);
+    else             stopTimer();
 }
 
 // ── Transition presets ────────────────────────────────────────────────────────
@@ -273,6 +316,15 @@ void MixingPage::resized()
         auto row = area.removeFromTop(30);
         playButton.setBounds      (row.removeFromLeft(32).withSizeKeepingCentre(32, 30));
         row.removeFromLeft(6);
+        //position for new playback buttons
+        pauseButton.setBounds(row.removeFromLeft(58));
+        row.removeFromLeft(6);
+
+        resumeButton.setBounds(row.removeFromLeft(66));
+        row.removeFromLeft(6);
+
+        stopButton.setBounds(row.removeFromLeft(50));
+        row.removeFromLeft(6);
         recordButton.setBounds    (row.removeFromLeft(32).withSizeKeepingCentre(32, 30));
         recordingsButton.setBounds(row.removeFromRight(96).withSizeKeepingCentre(96, 28));
     }
@@ -285,7 +337,13 @@ void MixingPage::resized()
     // Transition Presets button — right-aligned in the gap row
     {
         auto row = area.removeFromTop(26);
+
         transitionPresetsButton.setBounds(row.removeFromRight(162));
+
+        row.removeFromRight(12); //spacing between controls
+
+        scratchSlider.setBounds(row.removeFromLeft(
+            juce::jmin(260, row.getWidth())));
     }
     area.removeFromTop(6);
 

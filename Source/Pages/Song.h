@@ -8,11 +8,11 @@ struct Song
     juce::String title;
     juce::String artist;
     juce::String album;
+    juce::String filePath; //jasens added integration for storing location of uploaded file
     int          releaseYear     = 0; // 0 = unknown
     juce::Time              dateAdded;
     int                     durationSeconds = 0; // 0 = unknown
     juce::Array<Transition> transitions;
-    juce::File              audioFile; // stored copy in the library folder empty if no audio
 };
 
 inline juce::String formatSongDuration(int secs)

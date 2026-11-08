@@ -36,7 +36,65 @@ MainComponent::MainComponent()
     transitionsPage.updateTransitionInSong= [this](juce::String s1, int idx, Transition t) { songsPage.updateTransitionInSong(s1, idx, t); };
 
     mixingPage.getTransitionsForPair      = [this](juce::String s1, juce::String s2) { return songsPage.getTransitionsForPair(s1, s2); };
-    mixingPage.setAudioPlayer(&audioPlayer); // play button charts volume
+
+    // FRONTEND/BACKEND INTEGRATION: Connect the Mixing page controls to JUCE vibe coded 
+
+    mixingPage.onPlaySong = [this](const Song& song)
+        {
+            //only play songs with the right files attached mp3 and wav
+            if (song.filePath.isEmpty())
+                return false;
+
+            return audioEngine.playSong(juce::File(song.filePath));
+        };
+
+    //pause the song without losing its current position
+    mixingPage.onPause = [this] { audioEngine.pause(); };
+
+    //resume the previously paused song
+    mixingPage.onResume = [this] { audioEngine.resume(); };
+
+    //stop the song and reset its playback position
+    mixingPage.onStop = [this] { audioEngine.stop(); };
+
+    //changes JUCE volume with the slider
+    mixingPage.onVolumeChanged = [this](float gain)
+        {
+            audioEngine.setVolume(gain);
+        };
+    mixingPage.onSpeedChanged = [this](double speed)
+        {
+            audioEngine.setPlaybackSpeed(speed);
+        };
+    mixingPage.onBassChanged = [this](float db)
+        {
+            audioEngine.setBass(db);
+        };
+
+    mixingPage.onMidsChanged = [this](float db)
+        {
+            audioEngine.setMids(db);
+        };
+
+    mixingPage.onTrebleChanged = [this](float db)
+        {
+            audioEngine.setTreble(db);
+        };
+
+    mixingPage.onScratch = [this](double offsetSeconds)
+        {
+            audioEngine.scratch(offsetSeconds);
+        };
+
+    // playhead jump to and skip read from the same engine
+    mixingPage.getPlaybackPosition = [this] { return audioEngine.getPosition(); };
+    mixingPage.getPlaybackLength   = [this] { return audioEngine.getLength(); };
+    mixingPage.isPlaybackActive    = [this] { return audioEngine.isPlaying(); };
+    mixingPage.getLoadedFilePath   = [this] { return audioEngine.getLoadedFilePath(); };
+    mixingPage.onSeek              = [this](double seconds) { audioEngine.setPosition(seconds); };
+
+    //starting volume is set at 75%
+    audioEngine.setVolume(0.75f);
 
     songsPage.getPlaylistsForSong = [this](const Song& s)
     {

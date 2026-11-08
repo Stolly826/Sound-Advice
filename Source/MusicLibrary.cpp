@@ -69,7 +69,7 @@ bool MusicLibrary::saveSongs (const juce::Array<Song>& songs) const
 
 bool MusicLibrary::importSong (Song& song)
 {
-    const juce::File source = song.audioFile;
+    const juce::File source (song.filePath);
     if (! source.existsAsFile())
         return false;
 
@@ -94,15 +94,16 @@ bool MusicLibrary::importSong (Song& song)
         return false;
     }
 
-    song.audioFile = dest;
+    song.filePath = dest.getFullPathName();
     return true;
 }
 
 void MusicLibrary::deleteSongFile (const Song& song) const
 {
     // never delete the users own files only our copies
-    if (song.audioFile.isAChildOf (getSongsFolder()))
-        song.audioFile.deleteFile();
+    const juce::File stored (song.filePath);
+    if (stored.isAChildOf (getSongsFolder()))
+        stored.deleteFile();
 }
 
 juce::File MusicLibrary::getImagesFolder() const  { return libraryFolder.getChildFile ("Images"); }
@@ -203,10 +204,11 @@ juce::var MusicLibrary::songToVar (const Song& s) const
 
     // files in our songs folder are saved by name only
     // so the library still works if the folder moves eg windows -> mac
-    if (s.audioFile.isAChildOf (getSongsFolder()))
-        obj->setProperty ("file", s.audioFile.getRelativePathFrom (getSongsFolder()));
-    else if (s.audioFile != juce::File())
-        obj->setProperty ("file", s.audioFile.getFullPathName());
+    const juce::File stored (s.filePath);
+    if (stored.isAChildOf (getSongsFolder()))
+        obj->setProperty ("file", stored.getRelativePathFrom (getSongsFolder()));
+    else if (s.filePath.isNotEmpty())
+        obj->setProperty ("file", s.filePath);
 
     juce::Array<juce::var> transitions;
     for (const auto& t : s.transitions)
@@ -283,8 +285,8 @@ Song MusicLibrary::varToSong (const juce::var& v) const
     // name only -> inside songs folder  full path -> use as is
     const auto file = v["file"].toString();
     if (file.isNotEmpty())
-        s.audioFile = juce::File::isAbsolutePath (file) ? juce::File (file)
-                                                        : getSongsFolder().getChildFile (file);
+        s.filePath = juce::File::isAbsolutePath (file) ? file
+                                                       : getSongsFolder().getChildFile (file).getFullPathName();
 
     if (auto* transitions = v["transitions"].getArray())
     {

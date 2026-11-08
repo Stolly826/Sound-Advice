@@ -107,7 +107,7 @@ bool SongsPage::addSongToLibrary(Song& s)
 {
     // copy the picked file into the library folder
     // songs added without a file skip this
-    if (s.audioFile != juce::File() && ! library.importSong(s))
+    if (s.filePath.isNotEmpty() && ! library.importSong(s))
     {
         juce::AlertWindow::showAsync(
             juce::MessageBoxOptions()

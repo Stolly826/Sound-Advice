@@ -2,6 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "SoundAdviceLookAndFeel.h"
+#include "AudioEngine.h"
 #include "Sidebar.h"
 #include "Pages/MainMenuPage.h"
 #include "Pages/PlaylistsPage.h"
@@ -9,7 +10,6 @@
 #include "Pages/SongsPage.h"
 #include "Pages/TransitionsPage.h"
 #include "Pages/MixingPage.h"
-#include "AudioPlayer.h"
 
 // Root UI component. Owns the sidebar and all pages.
 // Exactly one page is visible at a time; showPage() handles switching
@@ -26,7 +26,8 @@ public:
 
 private:
     SoundAdviceLookAndFeel lookAndFeel; // destroyed last
-    AudioPlayer            audioPlayer; // above the pages so it outlives them
+
+    AudioEngine audioEngine; //the audio engine thats shared by the front end
 
     Sidebar            sidebar;
     MainMenuPage       mainMenuPage;

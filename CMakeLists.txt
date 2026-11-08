@@ -38,6 +38,8 @@ target_sources(SoundAdvice PRIVATE
     Source/Main.cpp
     Source/MainComponent.cpp
     Source/MainComponent.h
+    Source/AudioEngine.cpp
+    Source/AudioEngine.h
     Source/Sidebar.cpp
     Source/Sidebar.h
     Source/SoundAdviceLookAndFeel.cpp
@@ -79,8 +81,6 @@ target_sources(SoundAdvice PRIVATE
     Source/Pages/SongsPage.h
     Source/Pages/TransitionsPage.cpp
     Source/Pages/TransitionsPage.h
-    Source/AudioPlayer.cpp
-    Source/AudioPlayer.h
     Source/MusicLibrary.cpp
     Source/MusicLibrary.h
 )
@@ -120,6 +120,7 @@ target_link_libraries(SoundAdvice
         juce::juce_audio_basics
         juce::juce_audio_formats   # reading WAV / MP3
         juce::juce_audio_devices   # speakers / Core Audio / WASAPI
+        juce::juce_dsp #audio processing for bass and stuff
         juce::juce_audio_utils     # waveform thumbnails, device selector UI
     PUBLIC
         juce::juce_recommended_config_flags

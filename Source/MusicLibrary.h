@@ -27,7 +27,7 @@ public:
     juce::Array<Song> loadSongs() const;
     bool saveSongs (const juce::Array<Song>& songs) const;
 
-    // copy song.audioFile into the songs folder and point the song at the copy
+    // copy song.filePath into the songs folder and point the song at the copy
     // also fills in the length if it isnt set
     // false if the file is missing not audio or the copy failed
     bool importSong (Song& song);
