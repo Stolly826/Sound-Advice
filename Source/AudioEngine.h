@@ -5,7 +5,42 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_dsp/juce_dsp.h>
+#include <atomic>
 #include <memory>
+#include "SongSettings.h"
+
+// Speed and EQ stages that sit between the transport and the speakers.
+// The setters are safe to call from the UI while audio is playing.
+class SongEffectsSource : public juce::AudioSource
+{
+public:
+    explicit SongEffectsSource(juce::AudioSource& input);
+
+    void setSpeed(double newSpeed);
+    void setEq(double newBassDb, double newMidsDb, double newTrebleDb);
+
+    void prepareToPlay(int samplesPerBlockExpected, double sampleRate) override;
+    void releaseResources() override;
+    void getNextAudioBlock(const juce::AudioSourceChannelInfo& info) override;
+
+private:
+    enum Band { bass, mids, treble, numBands };
+    static constexpr int kNumChannels = 2;
+
+    juce::ResamplingAudioSource resampler;
+    juce::IIRFilter filters[kNumChannels][numBands];
+
+    std::atomic<double> speed { 1.0 };
+    std::atomic<double> bassDb { 0.0 };
+    std::atomic<double> midsDb { 0.0 };
+    std::atomic<double> trebleDb { 0.0 };
+    std::atomic<bool> eqChanged { true };
+    double currentSampleRate = 0.0;
+
+    void updateFilters();
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SongEffectsSource)
+};
 
 class AudioEngine
 {
@@ -22,12 +57,12 @@ public:
     void pause();
     void resume(); // FRONTEND/BACKEND INTEGRATION: Dedicated Resume button
     void stop();
-    void setVolume(float gain);
-    void setPlaybackSpeed(double speedMultiplier);
-    void setBass(float decibels);
-    void setMids(float decibels);
-    void setTreble(float decibels);
     void scratch(double offsetSeconds);
+
+    // FRONTEND/BACKEND INTEGRATION: Speed, volume, gain and EQ for the current song
+    void applySettings(const SongSettings& settings);
+
+    juce::AudioFormatManager& getFormats() { return formatManager; }
 
     // playback info for the mixing page playhead jump to and skip
     double getPosition() const { return transport.getCurrentPosition(); }  // seconds
@@ -40,11 +75,8 @@ private:
     juce::AudioFormatManager formatManager;
     std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
     juce::AudioTransportSource transport;
+    SongEffectsSource effects { transport };
     juce::AudioSourcePlayer audioPlayer;
-    juce::IIRFilterAudioSource bassFilter{ &speedResampler, false };
-    juce::IIRFilterAudioSource midsFilter{ &bassFilter, false };
-    juce::IIRFilterAudioSource trebleFilter{ &midsFilter, false };
-    juce::ResamplingAudioSource speedResampler{ &transport, false, 2 };
     juce::AudioDeviceManager deviceManager;
     juce::String deviceError;
     juce::String loadedFilePath;

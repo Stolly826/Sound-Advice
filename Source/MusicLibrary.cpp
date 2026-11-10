@@ -168,6 +168,48 @@ void MusicLibrary::deletePlaylistImage (const Playlist& playlist) const
         playlist.imageFile.deleteFile();
 }
 
+juce::File MusicLibrary::getSettingsFile() const { return libraryFolder.getChildFile ("settings.json"); }
+
+juce::String MusicLibrary::getSettingsKey (const Song& song) const
+{
+    // same rule as songToVar name only for our copies so it works on any computer
+    const juce::File stored (song.filePath);
+    if (stored.isAChildOf (getSongsFolder()))
+        return stored.getRelativePathFrom (getSongsFolder());
+
+    return song.filePath;
+}
+
+std::map<juce::String, SongSettings> MusicLibrary::loadSongSettings() const
+{
+    std::map<juce::String, SongSettings> settings;
+
+    // missing or broken file just means every song starts on the defaults
+    const auto parsed = juce::JSON::parse (getSettingsFile());
+    if (auto* list = parsed.getArray())
+        for (const auto& item : *list)
+            if (item["file"].toString().isNotEmpty())
+                settings[item["file"].toString()] = SongSettings::fromVar (item["settings"]);
+
+    return settings;
+}
+
+bool MusicLibrary::saveSongSettings (const std::map<juce::String, SongSettings>& settings) const
+{
+    juce::Array<juce::var> list;
+    for (const auto& [file, s] : settings)
+    {
+        auto* obj = new juce::DynamicObject();
+        obj->setProperty ("file",     file);
+        obj->setProperty ("settings", s.toVar());
+        list.add (juce::var (obj));
+    }
+
+    // same safe swap as the song library
+    libraryFolder.createDirectory();
+    return getSettingsFile().replaceWithText (juce::JSON::toString (juce::var (list)));
+}
+
 bool MusicLibrary::copyWithStreams (const juce::File& from, const juce::File& to)
 {
     // binary so windows doesnt mess with line ending bytes

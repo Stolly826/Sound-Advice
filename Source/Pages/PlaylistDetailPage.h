@@ -30,6 +30,9 @@ public:
     // add new song puts it in the library first false if that failed
     std::function<bool(Song&)> addSongToLibrary;
 
+    // FRONTEND/BACKEND INTEGRATION: reads tags for the add song dialog (set by MainComponent)
+    std::function<Song(const juce::File&)> readSongDetails;
+
     PlaylistDetailPage();
     void setPlaylist(Playlist* playlist);
 

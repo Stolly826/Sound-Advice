@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 
 static constexpr int kSidebarWidth = 220;
+static constexpr int kSaveDelayMs  = 500;
 
 MainComponent::MainComponent()
 {
@@ -39,12 +40,13 @@ MainComponent::MainComponent()
 
     // FRONTEND/BACKEND INTEGRATION: Connect the Mixing page controls to JUCE vibe coded 
 
-    mixingPage.onPlaySong = [this](const Song& song)
+    mixingPage.onPlaySong = [this](const Song& song, const SongSettings& settings)
         {
             //only play songs with the right files attached mp3 and wav
             if (song.filePath.isEmpty())
                 return false;
 
+            audioEngine.applySettings(settings);
             return audioEngine.playSong(juce::File(song.filePath));
         };
 
@@ -57,29 +59,49 @@ MainComponent::MainComponent()
     //stop the song and reset its playback position
     mixingPage.onStop = [this] { audioEngine.stop(); };
 
-    //changes JUCE volume with the slider
-    mixingPage.onVolumeChanged = [this](float gain)
+    //each song remembers its own speed, volume, gain and eq
+    songSettings = songsPage.getLibrary().loadSongSettings();
+
+    mixingPage.getSongSettings = [this](const Song& song)
         {
-            audioEngine.setVolume(gain);
-        };
-    mixingPage.onSpeedChanged = [this](double speed)
-        {
-            audioEngine.setPlaybackSpeed(speed);
-        };
-    mixingPage.onBassChanged = [this](float db)
-        {
-            audioEngine.setBass(db);
+            const auto found = songSettings.find(songsPage.getLibrary().getSettingsKey(song));
+            return found != songSettings.end() ? found->second : SongSettings{};
         };
 
-    mixingPage.onMidsChanged = [this](float db)
+    //changes are heard straight away, the file gets written once the sliders settle
+    mixingPage.onSongSettingsChanged = [this](const Song& song, const SongSettings& settings)
         {
-            audioEngine.setMids(db);
+            audioEngine.applySettings(settings);
+
+            const auto key = songsPage.getLibrary().getSettingsKey(song);
+            if (key.isNotEmpty())
+            {
+                songSettings[key] = settings;
+                startTimer(kSaveDelayMs);
+            }
         };
 
-    mixingPage.onTrebleChanged = [this](float db)
+    //a removed songs file can be reused by the next upload so its settings go with it
+    songsPage.onSongRemoved = [this](const Song& song)
         {
-            audioEngine.setTreble(db);
+            if (songSettings.erase(songsPage.getLibrary().getSettingsKey(song)) > 0)
+                songsPage.getLibrary().saveSongSettings(songSettings);
         };
+
+    // FRONTEND/BACKEND INTEGRATION: fill in the add song dialog from the files own tags
+    auto readSongDetails = [this](const juce::File& file)
+        {
+            const auto info = SongData::readDetails(audioEngine.getFormats(), file);
+
+            Song s;
+            s.title           = info.title;
+            s.artist          = info.artist;
+            s.album           = info.album;
+            s.durationSeconds = juce::roundToInt(info.lengthSeconds);
+            return s;
+        };
+    songsPage.readSongDetails          = readSongDetails;
+    playlistDetailPage.readSongDetails = readSongDetails;
 
     mixingPage.onScratch = [this](double offsetSeconds)
         {
@@ -93,9 +115,6 @@ MainComponent::MainComponent()
     mixingPage.getLoadedFilePath   = [this] { return audioEngine.getLoadedFilePath(); };
     mixingPage.onSeek              = [this](double seconds) { audioEngine.setPosition(seconds); };
 
-    //starting volume is set at 75%
-    audioEngine.setVolume(0.75f);
-
     songsPage.getPlaylistsForSong = [this](const Song& s)
     {
         return playlistsPage.getPlaylistNamesContaining(s);
@@ -108,8 +127,19 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    if (isTimerRunning())
+        timerCallback(); //dont lose a slider change made right before closing
+
     sidebar.setPageContent(nullptr);
     setLookAndFeel(nullptr);
+}
+
+void MainComponent::timerCallback()
+{
+    stopTimer();
+
+    if (! songsPage.getLibrary().saveSongSettings(songSettings))
+        DBG("couldnt save song settings to " + songsPage.getLibrary().getSettingsFile().getFullPathName());
 }
 
 void MainComponent::showPlaylistDetail(Playlist* playlist)

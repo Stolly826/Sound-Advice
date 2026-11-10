@@ -1,5 +1,92 @@
 #include "AudioEngine.h"
 
+// Where each EQ band sits. Bass and treble are shelves, mids is a wide bell.
+static constexpr double kBassHz   = 200.0;
+static constexpr double kMidsHz   = 1000.0;
+static constexpr double kTrebleHz = 4000.0;
+static constexpr double kEqQ      = 0.7071;
+
+SongEffectsSource::SongEffectsSource(juce::AudioSource& input)
+    : resampler(&input, false, kNumChannels)
+{
+}
+
+void SongEffectsSource::setSpeed(double newSpeed)
+{
+    speed = newSpeed;
+    resampler.setResamplingRatio(newSpeed);
+}
+
+void SongEffectsSource::setEq(double newBassDb, double newMidsDb, double newTrebleDb)
+{
+    bassDb = newBassDb;
+    midsDb = newMidsDb;
+    trebleDb = newTrebleDb;
+    eqChanged = true; // The audio thread rebuilds the filters on its next block.
+}
+
+void SongEffectsSource::prepareToPlay(int samplesPerBlockExpected, double sampleRate)
+{
+    currentSampleRate = sampleRate;
+
+    // The resampler tells its input the sample rate is scaled by its ratio, and the
+    // transport would then correct for that and cancel the speed out. Preparing at
+    // normal speed avoids that if the device restarts mid-song, and the bigger block
+    // stops the resampler reallocating on the audio thread at top speed.
+    resampler.setResamplingRatio(1.0);
+    resampler.prepareToPlay(juce::roundToInt(samplesPerBlockExpected * SongSettings::maxSpeed),
+                            sampleRate);
+    resampler.setResamplingRatio(speed);
+
+    for (auto& channel : filters)
+        for (auto& filter : channel)
+            filter.reset();
+
+    eqChanged = true;
+}
+
+void SongEffectsSource::releaseResources()
+{
+    resampler.releaseResources();
+}
+
+void SongEffectsSource::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
+{
+    resampler.getNextAudioBlock(info);
+
+    if (eqChanged.exchange(false))
+        updateFilters();
+
+    const int numChannels = juce::jmin(kNumChannels, info.buffer->getNumChannels());
+
+    for (int ch = 0; ch < numChannels; ++ch)
+    {
+        auto* samples = info.buffer->getWritePointer(ch, info.startSample);
+
+        for (auto& filter : filters[ch])
+            filter.processSamples(samples, info.numSamples);
+
+        // Gain and EQ can both boost, so stop peaks from going past full scale.
+        juce::FloatVectorOperations::clip(samples, samples, -1.0f, 1.0f, info.numSamples);
+    }
+}
+
+void SongEffectsSource::updateFilters()
+{
+    auto toGain = [](double db) { return (float)juce::Decibels::decibelsToGain(db); };
+
+    const auto bassBand = juce::IIRCoefficients::makeLowShelf(currentSampleRate, kBassHz, kEqQ, toGain(bassDb));
+    const auto midsBand = juce::IIRCoefficients::makePeakFilter(currentSampleRate, kMidsHz, kEqQ, toGain(midsDb));
+    const auto trebleBand = juce::IIRCoefficients::makeHighShelf(currentSampleRate, kTrebleHz, kEqQ, toGain(trebleDb));
+
+    for (auto& channel : filters)
+    {
+        channel[bass].setCoefficients(bassBand);
+        channel[mids].setCoefficients(midsBand);
+        channel[treble].setCoefficients(trebleBand);
+    }
+}
+
 AudioEngine::AudioEngine()
 {
     // FRONTEND/BACKEND INTEGRATION: Recognise WAV, MP3, and other JUCE formats.
@@ -9,10 +96,7 @@ AudioEngine::AudioEngine()
     deviceError = deviceManager.initialiseWithDefaultDevices(0, 2);
     if (deviceError.isEmpty())
     {
-        setBass(0.0f);
-        setMids(0.0f);
-        setTreble(0.0f);
-        audioPlayer.setSource(&trebleFilter); //sending audio through resampler scrum37
+        audioPlayer.setSource(&effects); // speed and EQ sit between the transport and the speakers
         deviceManager.addAudioCallback(&audioPlayer);
     }
 }
@@ -87,59 +171,14 @@ void AudioEngine::stop()
     paused = false;
 }
 
-void AudioEngine::setVolume(float gain)
+void AudioEngine::applySettings(const SongSettings& settings)
 {
-    transport.setGain(juce::jlimit(0.0f, 1.0f, gain));
+    // Volume and gain are both level changes, so the transport's smoothed gain does both.
+    transport.setGain((float)(settings.volume * juce::Decibels::decibelsToGain(settings.gainDb)));
+    effects.setSpeed(settings.speed);
+    effects.setEq(settings.bassDb, settings.midsDb, settings.trebleDb);
 }
 
-void AudioEngine::setPlaybackSpeed(double speedMultiplier)
-{
-    //parameters for the speed so it stays between 0.5 and 1.5
-    speedMultiplier = juce::jlimit(0.5, 1.5, speedMultiplier);
-    speedResampler.setResamplingRatio(speedMultiplier);
-}
-
-//Bass
-void AudioEngine::setBass(float decibels)
-{
-    auto* device = deviceManager.getCurrentAudioDevice();
-    if (device == nullptr) return;
-
-    float gain = juce::Decibels::decibelsToGain(
-        juce::jlimit(-12.0f, 12.0f, decibels));
-
-    bassFilter.setCoefficients(
-        juce::IIRCoefficients::makeLowShelf(
-            device->getCurrentSampleRate(), 200.0, 0.707, gain));
-}
-
-//middle frequencies
-void AudioEngine::setMids(float decibels)
-{
-    auto* device = deviceManager.getCurrentAudioDevice();
-    if (device == nullptr) return;
-
-    float gain = juce::Decibels::decibelsToGain(
-        juce::jlimit(-12.0f, 12.0f, decibels));
-
-    midsFilter.setCoefficients(
-        juce::IIRCoefficients::makePeakFilter(
-            device->getCurrentSampleRate(), 1000.0, 0.707, gain));
-}
-
-//Treble
-void AudioEngine::setTreble(float decibels)
-{
-    auto* device = deviceManager.getCurrentAudioDevice();
-    if (device == nullptr) return;
-
-    float gain = juce::Decibels::decibelsToGain(
-        juce::jlimit(-12.0f, 12.0f, decibels));
-
-    trebleFilter.setCoefficients(
-        juce::IIRCoefficients::makeHighShelf(
-            device->getCurrentSampleRate(), 4000.0, 0.707, gain));
-}
 //scratch stuff
 void AudioEngine::scratch(double offsetSeconds)
 {

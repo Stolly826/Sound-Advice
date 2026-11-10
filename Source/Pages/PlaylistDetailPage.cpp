@@ -278,6 +278,7 @@ void PlaylistDetailPage::showPickSongDialog()
 void PlaylistDetailPage::showAddSongDialog()
 {
     auto* content = new AddSongDialog();
+    content->readSongDetails = readSongDetails;
     content->onCreated = [this](Song s)
     {
         // goes into the library too so the file gets copied and saved

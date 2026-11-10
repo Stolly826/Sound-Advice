@@ -99,17 +99,28 @@ void AddSongDialog::onChooseFile()
         {
             const auto result = fc.getResult();
             if (result.existsAsFile())
-            {
-                selectedFile = result;
-                fileNameLabel.setText(result.getFileName(), juce::dontSendNotification);
-                fileNameLabel.setColour(juce::Label::textColourId,
-                                        juce::Colours::white.withAlpha(0.85f));
-
-                // TODO: process audio file
-                // - read ID3/metadata tags → pre-fill titleEditor, artistEditor, albumEditor
-                // - analyse BPM, key, energy for transition recommendations
-            }
+                onFileChosen(result);
         });
+}
+
+void AddSongDialog::onFileChosen(const juce::File& file)
+{
+    selectedFile = file;
+    fileNameLabel.setText(file.getFileName(), juce::dontSendNotification);
+    fileNameLabel.setColour(juce::Label::textColourId,
+                            juce::Colours::white.withAlpha(0.85f));
+
+    // FRONTEND/BACKEND INTEGRATION: Pre-fill the form from the file's own details
+    if (readSongDetails)
+    {
+        const auto details = readSongDetails(file);
+        titleEditor.setText(details.title);
+        artistEditor.setText(details.artist);
+        albumEditor.setText(details.album);
+        selectedDuration = details.durationSeconds;
+    }
+
+    // TODO: analyse key and energy for transition recommendations
 }
 
 void AddSongDialog::onAddClicked()
@@ -128,6 +139,7 @@ void AddSongDialog::onAddClicked()
     s.album     = albumEditor.getText().trim();
     s.filePath = selectedFile.existsAsFile() ? selectedFile.getFullPathName() : juce::String{}; //saves file full location jasen edit
     s.dateAdded = juce::Time::getCurrentTime();
+    s.durationSeconds = selectedDuration;
 
     if (onCreated) onCreated(std::move(s));
 

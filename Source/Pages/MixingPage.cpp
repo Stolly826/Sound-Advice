@@ -3,8 +3,8 @@
 static constexpr int kPad       = 16;
 static constexpr int kChartH    = 165;
 static constexpr int kLabelW    = 70;
-static constexpr int kSliderH   = 32;
-static constexpr int kSliderGap = 6;
+static constexpr int kSliderH   = 26;
+static constexpr int kSliderGap = 4;
 static constexpr int kColGap    = 20;
 static constexpr int kSepGap    = 10;
 
@@ -24,14 +24,12 @@ MixingPage::MixingPage()
     playButton.onClick = [this]
         {
             // Make sure a valid song is selected from a playlist
-            if (currentPlaylist == nullptr ||
-                !juce::isPositiveAndBelow(currentIndex, currentPlaylist->songs.size()))
+            const auto* song = getCurrentSong();
+            if (song == nullptr)
                 return;
 
-            const auto& song = currentPlaylist->songs[currentIndex];
-
             // Ask MainComponent to play the selected audio file
-            if (!onPlaySong || !onPlaySong(song))
+            if (!onPlaySong || !onPlaySong(*song, getSliderSettings()))
                 juce::AlertWindow::showMessageBoxAsync(
                     juce::MessageBoxIconType::WarningIcon,
                     "Unable to play song",
@@ -68,46 +66,38 @@ MixingPage::MixingPage()
         addAndMakeVisible(l);
     }
 
-    for (auto* l : { &volumeLabel, &pitchLabel, &speedLabel,
-                     &trebleLabel, &midsLabel,   &bassLabel })
+    for (auto* l : { &volumeLabel, &gainLabel, &pitchLabel, &speedLabel,
+                     &trebleLabel, &midsLabel, &bassLabel })
     {
         l->setFont(juce::FontOptions(12.0f));
         addAndMakeVisible(l);
     }
 
-    setupSlider(volumeSlider,   0.0, 100.0,  75.0);
-    volumeSlider.onValueChange = [this]
+    const SongSettings defaults;
+    const double maxGain = SongSettings::maxGainDb;
+    const double maxEq   = SongSettings::maxEqDb;
+
+    setupSlider(volumeSlider,    0.0, 100.0, defaults.volume * 100.0, "%", 0);
+    setupSlider(gainSlider, -maxGain, maxGain, defaults.gainDb, " dB", 1);
+    setupSlider(pitchSlider,   -12.0,  12.0,   0.0, " st", 1);
+    setupSlider(speedSlider, SongSettings::minSpeed * 100.0, SongSettings::maxSpeed * 100.0,
+                defaults.speed * 100.0, "%", 0);
+    setupSlider(trebleSlider, -maxEq, maxEq, defaults.trebleDb, " dB", 1);
+    setupSlider(midsSlider,   -maxEq, maxEq, defaults.midsDb,   " dB", 1);
+    setupSlider(bassSlider,   -maxEq, maxEq, defaults.bassDb,   " dB", 1);
+
+    // FRONTEND/BACKEND INTEGRATION: Moving a slider updates the current song only
+    songSliders = { &volumeSlider, &gainSlider, &speedSlider,
+                    &trebleSlider, &midsSlider, &bassSlider };
+
+    for (auto* s : songSliders)
+        s->onValueChange = [this]
         {
-            if (onVolumeChanged)
-                onVolumeChanged(static_cast<float>(volumeSlider.getValue() / 100.0));
-        };
-    setupSlider(pitchSlider,  -12.0,  12.0,   0.0);
-    setupSlider(speedSlider,   50.0, 150.0, 100.0);
-    speedSlider.onValueChange = [this]
-    {
-        if (onSpeedChanged)
-            onSpeedChanged(speedSlider.getValue() / 100.0);
-    };
-    setupSlider(trebleSlider, -12.0,  12.0,   0.0);
-    setupSlider(midsSlider,   -12.0,  12.0,   0.0);
-    setupSlider(bassSlider,   -12.0,  12.0,   0.0);
-    bassSlider.onValueChange = [this]
-        {
-            if (onBassChanged)
-                onBassChanged(static_cast<float>(bassSlider.getValue()));
+            const auto* song = getCurrentSong();
+            if (song != nullptr && onSongSettingsChanged)
+                onSongSettingsChanged(*song, getSliderSettings());
         };
 
-    midsSlider.onValueChange = [this]
-        {
-            if (onMidsChanged)
-                onMidsChanged(static_cast<float>(midsSlider.getValue()));
-        };
-
-    trebleSlider.onValueChange = [this]
-        {
-            if (onTrebleChanged)
-                onTrebleChanged(static_cast<float>(trebleSlider.getValue()));
-        };
     //scratch slider
     scratchSlider.setSliderStyle(juce::Slider::LinearHorizontal);
     scratchSlider.setRange(-2.0, 2.0, 0.05);
@@ -135,12 +125,16 @@ MixingPage::MixingPage()
         };
 }
 
-void MixingPage::setupSlider(juce::Slider& s, double min, double max, double def)
+void MixingPage::setupSlider(juce::Slider& s, double min, double max, double def,
+                             const juce::String& suffix, int decimals)
 {
     s.setSliderStyle(juce::Slider::LinearHorizontal);
-    s.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    s.setTextBoxStyle(juce::Slider::TextBoxRight, false, 64, 20);
     s.setRange(min, max);
+    s.setNumDecimalPlacesToDisplay(decimals);
+    s.setTextValueSuffix(suffix);
     s.setValue(def, juce::dontSendNotification);
+    s.setDoubleClickReturnValue(true, def);
     addAndMakeVisible(s);
 }
 
@@ -151,6 +145,7 @@ void MixingPage::setContent(Playlist* playlist, int songIndex)
     if (onStop) onStop();
     currentPlaylist = playlist;
     currentIndex    = songIndex;
+    loadSongSettings();
 
     // Reset editable state when loading new content
     chart1.setEditable(true);
@@ -211,7 +206,7 @@ void MixingPage::jumpTo(float position)
 
     // start the song if it isnt playing yet then move to the spot
     // position is 0 to 1 across the chart
-    if (! onPlaySong || ! onPlaySong(currentPlaylist->songs[currentIndex]))
+    if (! onPlaySong || ! onPlaySong(currentPlaylist->songs[currentIndex], getSliderSettings()))
         return;
 
     if (onSeek && getPlaybackLength)
@@ -227,7 +222,7 @@ void MixingPage::skipToNext()
     setContent(currentPlaylist, currentIndex + 1); // this stops the old song
 
     if (wasPlaying && onPlaySong)
-        onPlaySong(currentPlaylist->songs[currentIndex]);
+        onPlaySong(currentPlaylist->songs[currentIndex], getSliderSettings()); // the next songs own settings
 }
 
 void MixingPage::timerCallback()
@@ -242,6 +237,52 @@ void MixingPage::timerCallback()
     // use the real length if the song didnt have one
     if (currentPlaylist->songs[currentIndex].durationSeconds <= 0)
         chart1.setSongDuration(juce::roundToInt(length));
+}
+
+// ── Per-song settings ─────────────────────────────────────────────────────────
+
+const Song* MixingPage::getCurrentSong() const
+{
+    if (currentPlaylist == nullptr ||
+        !juce::isPositiveAndBelow(currentIndex, currentPlaylist->songs.size()))
+        return nullptr;
+
+    return &currentPlaylist->songs.getReference(currentIndex);
+}
+
+SongSettings MixingPage::getSliderSettings() const
+{
+    SongSettings settings;
+    settings.speed    = speedSlider.getValue() / 100.0;
+    settings.volume   = volumeSlider.getValue() / 100.0;
+    settings.gainDb   = gainSlider.getValue();
+    settings.bassDb   = bassSlider.getValue();
+    settings.midsDb   = midsSlider.getValue();
+    settings.trebleDb = trebleSlider.getValue();
+    return settings;
+}
+
+void MixingPage::loadSongSettings()
+{
+    const auto* song    = getCurrentSong();
+    const bool hasAudio = song != nullptr && song->filePath.isNotEmpty();
+    const auto settings = hasAudio && getSongSettings ? getSongSettings(*song) : SongSettings{};
+
+    volumeSlider.setValue(settings.volume * 100.0, juce::dontSendNotification);
+    gainSlider  .setValue(settings.gainDb,         juce::dontSendNotification);
+    speedSlider .setValue(settings.speed * 100.0,  juce::dontSendNotification);
+    trebleSlider.setValue(settings.trebleDb,       juce::dontSendNotification);
+    midsSlider  .setValue(settings.midsDb,         juce::dontSendNotification);
+    bassSlider  .setValue(settings.bassDb,         juce::dontSendNotification);
+
+    // A song with no audio file has nothing to control.
+    for (auto* s : songSliders)
+        s->setEnabled(hasAudio);
+
+    pitchSlider.setEnabled(hasAudio);
+
+    controlsHeader.setText(hasAudio ? "CONTROLS" : "CONTROLS (no audio file for this song)",
+                           juce::dontSendNotification);
 }
 
 void MixingPage::visibilityChanged()
@@ -330,8 +371,13 @@ void MixingPage::resized()
     }
     area.removeFromTop(8);
 
+    // The charts give up height first so every slider row stays on screen
+    const int controlsH = 18 + 8 + 4 * kSliderH + 3 * kSliderGap;
+    const int gapsH     = 6 + 26 + 6 + kSepGap + 1 + kSepGap;
+    const int chartH    = juce::jmin(kChartH, (area.getHeight() - controlsH - gapsH) / 2);
+
     // Chart 1
-    chart1.setBounds(area.removeFromTop(kChartH));
+    chart1.setBounds(area.removeFromTop(chartH));
     area.removeFromTop(6);
 
     // Transition Presets button — right-aligned in the gap row
@@ -348,7 +394,7 @@ void MixingPage::resized()
     area.removeFromTop(6);
 
     // Chart 2
-    chart2.setBounds(area.removeFromTop(kChartH));
+    chart2.setBounds(area.removeFromTop(chartH));
 
     // Separator
     area.removeFromTop(kSepGap);
@@ -372,6 +418,8 @@ void MixingPage::resized()
     controlsHeader.setBounds(leftCol.removeFromTop(18));
     leftCol.removeFromTop(8);
     placeRow(volumeLabel, volumeSlider, leftCol);
+    leftCol.removeFromTop(kSliderGap);
+    placeRow(gainLabel,   gainSlider,   leftCol);
     leftCol.removeFromTop(kSliderGap);
     placeRow(pitchLabel,  pitchSlider,  leftCol);
     leftCol.removeFromTop(kSliderGap);

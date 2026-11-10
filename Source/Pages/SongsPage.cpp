@@ -146,6 +146,7 @@ void SongsPage::handleDeleteRequest(int index)
         {
             if (result == 1)
             {
+                if (onSongRemoved) onSongRemoved(songs[index]);
                 library.deleteSongFile(songs[index]); // remove the stored copy too
                 songs.remove(index);
                 saveLibrary();
@@ -157,6 +158,7 @@ void SongsPage::handleDeleteRequest(int index)
 void SongsPage::showAddSongDialog()
 {
     auto* content = new AddSongDialog();
+    content->readSongDetails = readSongDetails;
     content->onCreated = [this](Song s) { handleAddSong(std::move(s)); };
 
     juce::DialogWindow::LaunchOptions opts;

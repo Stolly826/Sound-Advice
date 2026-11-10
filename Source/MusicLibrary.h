@@ -2,6 +2,8 @@
 
 #include <juce_audio_formats/juce_audio_formats.h> // reading song length
 #include "Pages/Playlist.h"
+#include "SongSettings.h"
+#include <map>
 
 // local storage for the song library
 // uploaded files get copied into the app data folder with iostream
@@ -46,6 +48,13 @@ public:
     // false if the image cant be read or copied
     bool importPlaylistImage (Playlist& playlist);
     void deletePlaylistImage (const Playlist& playlist) const;
+
+    // per song speed volume gain and eq
+    // kept in settings.json and matched to songs by their stored file like library.json does
+    juce::File   getSettingsFile() const;
+    juce::String getSettingsKey (const Song& song) const;  // empty for songs with no file
+    std::map<juce::String, SongSettings> loadSongSettings() const;
+    bool saveSongSettings (const std::map<juce::String, SongSettings>& settings) const;
 
 private:
     juce::File libraryFolder;

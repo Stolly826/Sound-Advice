@@ -16,6 +16,10 @@ public:
     // Set by MainComponent so the detail dialog can query playlist membership.
     std::function<juce::StringArray(const Song&)> getPlaylistsForSong;
 
+    // FRONTEND/BACKEND INTEGRATION: Set by MainComponent.
+    std::function<Song(const juce::File&)> readSongDetails; // tags for the add song dialog
+    std::function<void(const Song&)>       onSongRemoved;   // so its settings can go too
+
     SongsPage();
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -32,6 +36,8 @@ public:
     void updateTransitionInSong (const juce::String& s1Title, int idx, const Transition& t);
 
     juce::Component& getSidebarContent() { return sidebarContent; }
+
+    MusicLibrary& getLibrary() { return library; }
 
 private:
     MusicLibrary                  library; // saves songs to disk
