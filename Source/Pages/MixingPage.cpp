@@ -52,6 +52,8 @@ MixingPage::MixingPage()
 
     addAndMakeVisible(recordingsButton);
     chart2.setIsNextSong(true);
+    chart1.onJumpTo = [this](float t) { jumpTo(t); };
+    chart1.onSkip   = [this] { skipToNext(); };
     addAndMakeVisible(chart1);
     addAndMakeVisible(chart2);
     transitionPresetsButton.onClick = [this] { showTransitionPresets(); };
@@ -94,6 +96,32 @@ MixingPage::MixingPage()
             const auto* song = getCurrentSong();
             if (song != nullptr && onSongSettingsChanged)
                 onSongSettingsChanged(*song, getSliderSettings());
+        };
+
+    //scratch slider
+    scratchSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    scratchSlider.setRange(-2.0, 2.0, 0.05);
+    scratchSlider.setValue(0.0, juce::dontSendNotification);
+    scratchSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 80, 24);
+    scratchSlider.setTextValueSuffix(" sec");
+    scratchSlider.setTooltip("Scratch: drag left or right");
+    addAndMakeVisible(scratchSlider);
+
+    scratchSlider.onValueChange = [this]
+        {
+            double newValue = scratchSlider.getValue();
+            double difference = newValue - previousScratchValue;
+
+            if (onScratch)
+                onScratch(difference);
+
+            previousScratchValue = newValue;
+        };
+
+    scratchSlider.onDragEnd = [this]
+        {
+            scratchSlider.setValue(0.0, juce::dontSendNotification);
+            previousScratchValue = 0.0;
         };
 }
 
@@ -144,6 +172,71 @@ void MixingPage::setContent(Playlist* playlist, int songIndex)
                 setContent(currentPlaylist, idx);
         };
     }
+
+    resetPlayhead();
+}
+
+// ── Playback ──────────────────────────────────────────────────────────────────
+// play pause resume stop go through the teams audio engine
+// these add the playhead jump to skip and loop return on top
+
+bool MixingPage::currentSongIsLoaded() const
+{
+    if (currentPlaylist == nullptr || ! juce::isPositiveAndBelow(currentIndex, currentPlaylist->songs.size()))
+        return false;
+
+    // engine still has the last song until play is pressed
+    const auto& path = currentPlaylist->songs[currentIndex].filePath;
+    return path.isNotEmpty() && getLoadedFilePath && getLoadedFilePath() == path;
+}
+
+void MixingPage::resetPlayhead()
+{
+    // line at the start for songs with audio hidden for demo songs
+    const bool hasAudio = currentPlaylist != nullptr
+                       && juce::isPositiveAndBelow(currentIndex, currentPlaylist->songs.size())
+                       && currentPlaylist->songs[currentIndex].filePath.isNotEmpty();
+    chart1.setPlayhead(hasAudio ? 0.0f : -1.0f);
+}
+
+void MixingPage::jumpTo(float position)
+{
+    if (currentPlaylist == nullptr || ! juce::isPositiveAndBelow(currentIndex, currentPlaylist->songs.size()))
+        return;
+
+    // start the song if it isnt playing yet then move to the spot
+    // position is 0 to 1 across the chart
+    if (! onPlaySong || ! onPlaySong(currentPlaylist->songs[currentIndex], getSliderSettings()))
+        return;
+
+    if (onSeek && getPlaybackLength)
+        onSeek(position * getPlaybackLength());
+}
+
+void MixingPage::skipToNext()
+{
+    if (currentPlaylist == nullptr || currentIndex + 1 >= currentPlaylist->songs.size()) return;
+
+    // keep playing if it was already playing
+    const bool wasPlaying = currentSongIsLoaded() && isPlaybackActive && isPlaybackActive();
+    setContent(currentPlaylist, currentIndex + 1); // this stops the old song
+
+    if (wasPlaying && onPlaySong)
+        onPlaySong(currentPlaylist->songs[currentIndex], getSliderSettings()); // the next songs own settings
+}
+
+void MixingPage::timerCallback()
+{
+    if (! currentSongIsLoaded() || ! getPlaybackPosition || ! getPlaybackLength) return;
+
+    const double length = getPlaybackLength();
+    if (length <= 0.0) return;
+
+    chart1.setPlayhead((float)(getPlaybackPosition() / length));
+
+    // use the real length if the song didnt have one
+    if (currentPlaylist->songs[currentIndex].durationSeconds <= 0)
+        chart1.setSongDuration(juce::roundToInt(length));
 }
 
 // ── Per-song settings ─────────────────────────────────────────────────────────
@@ -190,6 +283,13 @@ void MixingPage::loadSongSettings()
 
     controlsHeader.setText(hasAudio ? "CONTROLS" : "CONTROLS (no audio file for this song)",
                            juce::dontSendNotification);
+}
+
+void MixingPage::visibilityChanged()
+{
+    // only move the playhead while the page is showing
+    if (isVisible()) startTimerHz(30);
+    else             stopTimer();
 }
 
 // ── Transition presets ────────────────────────────────────────────────────────
@@ -283,7 +383,13 @@ void MixingPage::resized()
     // Transition Presets button — right-aligned in the gap row
     {
         auto row = area.removeFromTop(26);
+
         transitionPresetsButton.setBounds(row.removeFromRight(162));
+
+        row.removeFromRight(12); //spacing between controls
+
+        scratchSlider.setBounds(row.removeFromLeft(
+            juce::jmin(260, row.getWidth())));
     }
     area.removeFromTop(6);
 

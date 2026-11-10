@@ -13,6 +13,13 @@ public:
     // Fired when the user clicks the "Select Song" button on an empty chart.
     std::function<void()> onSelectSong;
 
+    // playback hooks set by mixing page
+    std::function<void(float)> onJumpTo;   // 0 to 1 position picked with jump to or loop return
+    std::function<void()>      onSkip;     // skip button
+
+    // where playback is 0 to 1 or -1 to hide the line
+    void setPlayhead(float position);
+
     void setSongName    (const juce::String& name);
     void setSongDuration(int seconds);
     juce::String getSongName() const { return songName; }
@@ -55,6 +62,7 @@ private:
     int            hoverX          = -1;
     bool           isNextSong      = false;
     bool           isEditable      = true;
+    float          playhead        = -1.0f;
 
     float          loopPoint  = -1.0f;
     float          startPoint = -1.0f;

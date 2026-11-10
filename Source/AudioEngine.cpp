@@ -3,7 +3,7 @@
 // Where each EQ band sits. Bass and treble are shelves, mids is a wide bell.
 static constexpr double kBassHz   = 200.0;
 static constexpr double kMidsHz   = 1000.0;
-static constexpr double kTrebleHz = 5000.0;
+static constexpr double kTrebleHz = 4000.0;
 static constexpr double kEqQ      = 0.7071;
 
 SongEffectsSource::SongEffectsSource(juce::AudioSource& input)
@@ -96,7 +96,7 @@ AudioEngine::AudioEngine()
     deviceError = deviceManager.initialiseWithDefaultDevices(0, 2);
     if (deviceError.isEmpty())
     {
-        audioPlayer.setSource(&effects);
+        audioPlayer.setSource(&effects); // speed and EQ sit between the transport and the speakers
         deviceManager.addAudioCallback(&audioPlayer);
     }
 }
@@ -177,4 +177,33 @@ void AudioEngine::applySettings(const SongSettings& settings)
     transport.setGain((float)(settings.volume * juce::Decibels::decibelsToGain(settings.gainDb)));
     effects.setSpeed(settings.speed);
     effects.setEq(settings.bassDb, settings.midsDb, settings.trebleDb);
+}
+
+//scratch stuff
+void AudioEngine::scratch(double offsetSeconds)
+{
+    //make sure song is loaded
+    if (!readerSource)
+        return;
+
+    double songLength = transport.getLengthInSeconds();
+    if (songLength <= 0.0)
+        return;
+
+    //showing where to move
+    double newPosition = transport.getCurrentPosition() + offsetSeconds;
+
+    //stays within bounds of the song
+    newPosition = juce::jlimit(0.0, songLength, newPosition);
+
+    //move playback
+    transport.setPosition(newPosition);
+}
+// jump to a time used by jump to and loop return
+void AudioEngine::setPosition(double seconds)
+{
+    if (!readerSource)
+        return;
+
+    transport.setPosition(juce::jlimit(0.0, transport.getLengthInSeconds(), seconds));
 }

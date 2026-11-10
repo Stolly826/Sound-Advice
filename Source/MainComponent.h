@@ -16,7 +16,8 @@
 // Exactly one page is visible at a time; showPage() handles switching
 // and shows/hides the sidebar accordingly.
 class MainComponent : public juce::Component,
-                      private juce::Timer
+                      public juce::DragAndDropContainer, // lets songs be dragged between parts of the window
+                      private juce::Timer                // saves song settings once the sliders settle
 {
 public:
     MainComponent();
@@ -29,7 +30,6 @@ private:
     SoundAdviceLookAndFeel lookAndFeel; // destroyed last
 
     AudioEngine audioEngine; //the audio engine thats shared by the front end
-    SongLibrary songLibrary; //every uploaded song and its settings, kept in library.json
 
     Sidebar            sidebar;
     MainMenuPage       mainMenuPage;
@@ -39,10 +39,12 @@ private:
     TransitionsPage    transitionsPage;
     MixingPage         mixingPage;
 
+    //every songs speed, volume, gain and eq, kept in settings.json
+    std::map<juce::String, SongSettings> songSettings;
+
     void showPage(juce::Component& page);
     void showPlaylistDetail(Playlist* playlist);
     void showMixingPage(Playlist* playlist, int songIndex);
-    void addUploadedSong(const Song& song);
     void timerCallback() override;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)

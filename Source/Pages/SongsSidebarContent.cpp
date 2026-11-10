@@ -77,7 +77,28 @@ void SongsSidebarContent::mouseExit(const juce::MouseEvent&)
 
 void SongsSidebarContent::mouseUp(const juce::MouseEvent& e)
 {
+    // a drag isnt a click
+    if (e.mouseWasDraggedSinceMouseDown()) return;
+
     const int idx = getItemIndexAt(e.getPosition());
     if (idx >= 0 && onItemClicked)
         onItemClicked(idx);
+}
+
+void SongsSidebarContent::mouseDrag(const juce::MouseEvent& e)
+{
+    if (! dragEnabled || e.getDistanceFromDragStart() < 6) return;
+
+    // item where the press started
+    const int idx = getItemIndexAt(e.getMouseDownPosition());
+    if (idx < 0) return;
+
+    auto* container = juce::DragAndDropContainer::findParentDragContainerFor(this);
+    if (container == nullptr || container->isDragAndDropActive()) return;
+
+    // picture of just that item follows the mouse
+    const auto itemArea = juce::Rectangle<int>(4, idx * (kItemHeight + 4), getWidth() - 8, kItemHeight);
+    const auto offset   = itemArea.getPosition() - e.getMouseDownPosition();
+    container->startDragging("library:" + juce::String(idx), this,
+                             juce::ScaledImage(createComponentSnapshot(itemArea)), false, &offset);
 }

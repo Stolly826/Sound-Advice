@@ -3,18 +3,6 @@
 static constexpr int kSidebarWidth = 220;
 static constexpr int kSaveDelayMs  = 500;
 
-static Song toSong(const SongInfo& info)
-{
-    Song s;
-    s.title           = info.title;
-    s.artist          = info.artist;
-    s.album           = info.album;
-    s.filePath        = info.path;
-    s.dateAdded       = juce::Time::fromISO8601(info.addedAt);
-    s.durationSeconds = juce::roundToInt(info.lengthSeconds);
-    return s;
-}
-
 MainComponent::MainComponent()
 {
     setLookAndFeel(&lookAndFeel);
@@ -36,6 +24,13 @@ MainComponent::MainComponent()
 
     playlistDetailPage.onSongClicked = [this](Playlist* p, int idx) { showMixingPage(p, idx); };
     playlistDetailPage.getAllSongs   = [this]() { return songsPage.getSongs(); };
+    // order changes and added songs get saved
+    playlistDetailPage.onPlaylistChanged = [this] { playlistsPage.playlistChanged(); };
+    playlistDetailPage.addSongToLibrary  = [this](Song& s) { return songsPage.addSongToLibrary(s); };
+    playlistDetailPage.onEditClicked     = [this](Playlist* p)
+    {
+        playlistsPage.showEditDialog(p, &playlistDetailPage, [this] { playlistDetailPage.refreshHeader(); });
+    };
     transitionsPage.getAllSongs           = [this]()                              { return songsPage.getSongs(); };
     transitionsPage.getTransitionsForPair = [this](juce::String s1, juce::String s2) { return songsPage.getTransitionsForPair(s1, s2); };
     transitionsPage.addTransitionToSong   = [this](juce::String s1, Transition t)    { songsPage.addTransitionToSong(s1, t); };
@@ -64,40 +59,61 @@ MainComponent::MainComponent()
     //stop the song and reset its playback position
     mixingPage.onStop = [this] { audioEngine.stop(); };
 
-    //each song remembers its own speed, volume, gain and eq in the library
+    //each song remembers its own speed, volume, gain and eq
+    songSettings = songsPage.getLibrary().loadSongSettings();
+
     mixingPage.getSongSettings = [this](const Song& song)
         {
-            const auto* info = songLibrary.findByPath(song.filePath);
-            return info != nullptr ? info->settings : SongSettings{};
+            const auto found = songSettings.find(songsPage.getLibrary().getSettingsKey(song));
+            return found != songSettings.end() ? found->second : SongSettings{};
         };
 
     //changes are heard straight away, the file gets written once the sliders settle
     mixingPage.onSongSettingsChanged = [this](const Song& song, const SongSettings& settings)
         {
             audioEngine.applySettings(settings);
-            songLibrary.setSettings(song.filePath, settings);
-            startTimer(kSaveDelayMs);
+
+            const auto key = songsPage.getLibrary().getSettingsKey(song);
+            if (key.isNotEmpty())
+            {
+                songSettings[key] = settings;
+                startTimer(kSaveDelayMs);
+            }
         };
 
-    // FRONTEND/BACKEND INTEGRATION: Connect the song pages to the song library
+    //a removed songs file can be reused by the next upload so its settings go with it
+    songsPage.onSongRemoved = [this](const Song& song)
+        {
+            if (songSettings.erase(songsPage.getLibrary().getSettingsKey(song)) > 0)
+                songsPage.getLibrary().saveSongSettings(songSettings);
+        };
 
-    //reads the song details from a file chosen in the add song dialog
+    // FRONTEND/BACKEND INTEGRATION: fill in the add song dialog from the files own tags
     auto readSongDetails = [this](const juce::File& file)
         {
-            return toSong(SongData::readDetails(audioEngine.getFormats(), file));
+            const auto info = SongData::readDetails(audioEngine.getFormats(), file);
+
+            Song s;
+            s.title           = info.title;
+            s.artist          = info.artist;
+            s.album           = info.album;
+            s.durationSeconds = juce::roundToInt(info.lengthSeconds);
+            return s;
         };
     songsPage.readSongDetails          = readSongDetails;
     playlistDetailPage.readSongDetails = readSongDetails;
 
-    songsPage.onNewSong          = [this](const Song& s) { addUploadedSong(s); };
-    playlistDetailPage.onNewSong = [this](const Song& s) { addUploadedSong(s); };
-    songsPage.onSongRemoved      = [this](const Song& s) { songLibrary.remove(s.filePath); };
+    mixingPage.onScratch = [this](double offsetSeconds)
+        {
+            audioEngine.scratch(offsetSeconds);
+        };
 
-    //brings back everything uploaded in earlier runs
-    juce::Array<Song> savedSongs;
-    for (const auto& info : songLibrary.getSongs())
-        savedSongs.add(toSong(info));
-    songsPage.addSongs(savedSongs);
+    // playhead jump to and skip read from the same engine
+    mixingPage.getPlaybackPosition = [this] { return audioEngine.getPosition(); };
+    mixingPage.getPlaybackLength   = [this] { return audioEngine.getLength(); };
+    mixingPage.isPlaybackActive    = [this] { return audioEngine.isPlaying(); };
+    mixingPage.getLoadedFilePath   = [this] { return audioEngine.getLoadedFilePath(); };
+    mixingPage.onSeek              = [this](double seconds) { audioEngine.setPosition(seconds); };
 
     songsPage.getPlaylistsForSong = [this](const Song& s)
     {
@@ -118,6 +134,14 @@ MainComponent::~MainComponent()
     setLookAndFeel(nullptr);
 }
 
+void MainComponent::timerCallback()
+{
+    stopTimer();
+
+    if (! songsPage.getLibrary().saveSongSettings(songSettings))
+        DBG("couldnt save song settings to " + songsPage.getLibrary().getSettingsFile().getFullPathName());
+}
+
 void MainComponent::showPlaylistDetail(Playlist* playlist)
 {
     playlistDetailPage.setPlaylist(playlist);
@@ -128,38 +152,6 @@ void MainComponent::showMixingPage(Playlist* playlist, int songIndex)
 {
     mixingPage.setContent(playlist, songIndex);
     showPage(mixingPage);
-}
-
-void MainComponent::addUploadedSong(const Song& song)
-{
-    //songs typed in without a file have no audio to save settings for
-    if (song.filePath.isNotEmpty())
-    {
-        //reading the whole song for bpm and loudness can take a second so show the loading cursor
-        juce::MouseCursor::showWaitCursor();
-        auto info = SongData::readSong(audioEngine.getFormats(), juce::File(song.filePath));
-        juce::MouseCursor::hideWaitCursor();
-
-        //whatever was typed in the dialog wins over the tags
-        info.title   = song.title;
-        info.artist  = song.artist;
-        info.album   = song.album;
-        info.addedAt = song.dateAdded.toISO8601(true);
-
-        if (!songLibrary.save(info))
-            juce::AlertWindow::showMessageBoxAsync(
-                juce::MessageBoxIconType::WarningIcon,
-                "Unable to save song",
-                "Could not write to " + songLibrary.getFile().getFullPathName());
-    }
-
-    songsPage.addSongs({ song });
-}
-
-void MainComponent::timerCallback()
-{
-    stopTimer();
-    songLibrary.writeToDisk();
 }
 
 void MainComponent::showPage(juce::Component& page)

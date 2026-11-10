@@ -34,7 +34,6 @@ add_executable(SoundAdviceMock
     SoundAdviceMock.cpp
     SoundAdviceMock.h
     ../Source/SongData.h
-    ../Source/SongSettings.h
 )
 
 #setting config rules for C++ code to be compatible w JUCE (looked this up)

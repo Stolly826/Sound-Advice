@@ -5,6 +5,7 @@
 #include "SongRow.h"
 #include "NewPlaylistRow.h"
 #include "SongsSidebarContent.h"
+#include "../MusicLibrary.h"
 
 // Global song library. Every song the user has ever added lives here.
 // Clicking a row opens a detail popup (name, artist, album, year,
@@ -15,10 +16,9 @@ public:
     // Set by MainComponent so the detail dialog can query playlist membership.
     std::function<juce::StringArray(const Song&)> getPlaylistsForSong;
 
-    // FRONTEND/BACKEND INTEGRATION: Set by MainComponent to reach the song library.
-    std::function<Song(const juce::File&)> readSongDetails;
-    std::function<void(const Song&)>       onNewSong;
-    std::function<void(const Song&)>       onSongRemoved;
+    // FRONTEND/BACKEND INTEGRATION: Set by MainComponent.
+    std::function<Song(const juce::File&)> readSongDetails; // tags for the add song dialog
+    std::function<void(const Song&)>       onSongRemoved;   // so its settings can go too
 
     SongsPage();
     void paint(juce::Graphics& g) override;
@@ -26,8 +26,9 @@ public:
 
     const juce::Array<Song>& getSongs() const { return songs; }
 
-    // Adds songs to the top of the list, last one first.
-    void addSongs(juce::Array<Song> newSongs);
+    // copy the file in add to the library and save
+    // song is updated to point at the stored copy false if it failed
+    bool addSongToLibrary(Song& s);
 
     juce::Array<Transition> getTransitionsForPair(const juce::String& s1,
                                                    const juce::String& s2) const;
@@ -36,7 +37,10 @@ public:
 
     juce::Component& getSidebarContent() { return sidebarContent; }
 
+    MusicLibrary& getLibrary() { return library; }
+
 private:
+    MusicLibrary                  library; // saves songs to disk
     juce::Array<Song>             songs;
 
     juce::Label                   titleLabel;
@@ -48,6 +52,8 @@ private:
     SongsSidebarContent sidebarContent;
 
     void rebuildList();
+    void saveLibrary();
+    void handleAddSong(Song s);
     void handleDeleteRequest(int index);
     void showAddSongDialog();
     void showSongDetail(int index);

@@ -4,6 +4,7 @@
 // This replaces the separate Win32-specific AudioEngine in deployment-prototype.
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_formats/juce_audio_formats.h>
+#include <juce_dsp/juce_dsp.h>
 #include <atomic>
 #include <memory>
 #include "SongSettings.h"
@@ -56,11 +57,19 @@ public:
     void pause();
     void resume(); // FRONTEND/BACKEND INTEGRATION: Dedicated Resume button
     void stop();
+    void scratch(double offsetSeconds);
 
     // FRONTEND/BACKEND INTEGRATION: Speed, volume, gain and EQ for the current song
     void applySettings(const SongSettings& settings);
 
     juce::AudioFormatManager& getFormats() { return formatManager; }
+
+    // playback info for the mixing page playhead jump to and skip
+    double getPosition() const { return transport.getCurrentPosition(); }  // seconds
+    double getLength() const   { return transport.getLengthInSeconds(); }  // seconds
+    bool   isPlaying() const   { return transport.isPlaying(); }
+    const juce::String& getLoadedFilePath() const { return loadedFilePath; }
+    void   setPosition(double seconds); // jump to a time in the song
 
 private:
     juce::AudioFormatManager formatManager;

@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
-#include "SongSettings.h"
 
 //everything we know about one uploaded song
 struct SongInfo
@@ -27,7 +26,6 @@ struct SongInfo
     int channels = 0;
     int bitrate = 0;            //kbps
     juce::String addedAt;
-    SongSettings settings;      //this songs own speed, volume, gain and eq
 
     juce::String formatLength() const
     {
@@ -68,7 +66,6 @@ struct SongInfo
         obj->setProperty("channels", channels);
         obj->setProperty("bitrate", bitrate);
         obj->setProperty("addedAt", addedAt);
-        obj->setProperty("settings", settings.toVar());
         return juce::var(obj);
     }
 
@@ -89,7 +86,6 @@ struct SongInfo
         info.channels = (int)v.getProperty("channels", 0);
         info.bitrate = (int)v.getProperty("bitrate", 0);
         info.addedAt = v.getProperty("addedAt", "").toString();
-        info.settings = SongSettings::fromVar(v.getProperty("settings", juce::var()));
         return info;
     }
 };
@@ -320,12 +316,8 @@ public:
     }
 
     //adds the song, or replaces it if the same file was uploaded before, then writes the file
-    //a replaced song keeps its playback controls so uploading it again doesnt reset them
-    bool save(SongInfo song)
+    bool save(const SongInfo& song)
     {
-        if (const SongInfo* existing = findByPath(song.path))
-            song.settings = existing->settings;
-
         songs.erase(std::remove_if(songs.begin(), songs.end(),
                                    [&](const SongInfo& s) { return s.path == song.path; }),
                     songs.end());
@@ -334,31 +326,7 @@ public:
         return writeToDisk();
     }
 
-    //forgets a song so it doesnt come back next run
-    bool remove(const juce::String& path)
-    {
-        songs.erase(std::remove_if(songs.begin(), songs.end(),
-                                   [&](const SongInfo& s) { return s.path == path; }),
-                    songs.end());
-
-        return writeToDisk();
-    }
-
-    //changes a songs playback controls in memory, false if that file isnt in the library
-    //sliders change these constantly so this doesnt touch the file, call writeToDisk when they settle
-    bool setSettings(const juce::String& path, const SongSettings& settings)
-    {
-        for (auto& song : songs)
-        {
-            if (song.path == path)
-            {
-                song.settings = settings;
-                return true;
-            }
-        }
-        return false;
-    }
-
+private:
     bool writeToDisk() const
     {
         juce::Array<juce::var> list;
@@ -373,7 +341,6 @@ public:
         return libraryFile.replaceWithText(juce::JSON::toString(juce::var(root)));
     }
 
-private:
     juce::File libraryFile;
     std::vector<SongInfo> songs;
 };
