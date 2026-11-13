@@ -40,14 +40,15 @@ MainComponent::MainComponent()
 
     // FRONTEND/BACKEND INTEGRATION: Connect the Mixing page controls to JUCE vibe coded 
 
-    mixingPage.onPlaySong = [this](const Song& song, const SongSettings& settings)
+    mixingPage.onPlaySong = [this](const Song& song, float fadeInStart, float fadeInEnd,
+                                   float fadeOutStart, float fadeOutEnd)
         {
             //only play songs with the right files attached mp3 and wav
             if (song.filePath.isEmpty())
                 return false;
 
-            audioEngine.applySettings(settings);
-            return audioEngine.playSong(juce::File(song.filePath));
+            return audioEngine.playSong(juce::File(song.filePath),
+                                        fadeInStart, fadeInEnd, fadeOutStart, fadeOutEnd);
         };
 
     //pause the song without losing its current position

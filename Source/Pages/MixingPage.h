@@ -13,7 +13,7 @@ class MixingPage : public juce::Component,
 public:
     std::function<juce::Array<Transition>(juce::String, juce::String)> getTransitionsForPair;
 
-    std::function<bool(const Song&, const SongSettings&)> onPlaySong;
+    std::function<bool(const Song&, float, float, float, float)> onPlaySong;
     std::function<void()> onPause;
     std::function<void()> onResume;
     std::function<void()> onStop;
@@ -43,6 +43,8 @@ public:
 private:
     Playlist* currentPlaylist = nullptr;
     int       currentIndex    = 0;
+    float     incomingFadeInStart = -1.0f;
+    float     incomingFadeInEnd   = -1.0f;
 
     // Header
     juce::Label      titleLabel;
