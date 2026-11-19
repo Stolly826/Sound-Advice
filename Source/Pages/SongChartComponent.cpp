@@ -96,6 +96,9 @@ SongChartComponent::SongChartComponent()
 
     selectSongButton.onClick = [this] { if (onSelectSong) onSelectSong(); };
     addAndMakeVisible(selectSongButton);
+
+    changeSongButton.onClick = [this] { if (onSelectSong) onSelectSong(); };
+    addChildComponent(changeSongButton); // shown by setSongName
 }
 
 // ── Public setters ─────────────────────────────────────────────────────────────
@@ -108,6 +111,7 @@ void SongChartComponent::setSongName(const juce::String& name)
     }
     songName = name;
     selectSongButton.setVisible(name.isEmpty());
+    changeSongButton.setVisible(name.isNotEmpty() && onSelectSong != nullptr);
     repaint();
 }
 
@@ -165,6 +169,9 @@ void SongChartComponent::resized()
 
     skipButton      .setBounds(right - btnSize,              btnY, btnSize, btnSize);
     loopReturnButton.setBounds(right - btnSize * 2 - gap,    btnY, btnSize, btnSize);
+
+    constexpr int selectW = 48;
+    changeSongButton.setBounds(right - btnSize * 2 - gap * 3 - selectW, btnY - 1, selectW, btnSize + 2);
 
     // "Select Song" centred in the chart data area
     auto ca = getChartArea();

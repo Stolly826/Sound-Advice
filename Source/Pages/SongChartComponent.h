@@ -72,6 +72,7 @@ private:
     OverlayButton      loopReturnButton { OverlayButton::Shape::LoopReturn };
     OverlayButton      skipButton       { OverlayButton::Shape::Skip };
     juce::TextButton   selectSongButton { "Select Song" };
+    juce::TextButton   changeSongButton { "Select" }; // small header button once a song is picked
 
     // Chart sub-area (excludes name header and legend strip)
     juce::Rectangle<int> getChartArea() const;

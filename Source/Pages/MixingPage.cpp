@@ -8,6 +8,23 @@ static constexpr int kSliderGap = 4;
 static constexpr int kColGap    = 20;
 static constexpr int kSepGap    = 10;
 
+static int songSeconds(const Playlist* playlist, int index)
+{
+    return playlist != nullptr && juce::isPositiveAndBelow(index, playlist->songs.size())
+         ? playlist->songs[index].durationSeconds : 0;
+}
+
+// with a fade in start but no end, the fade in lasts as many seconds as the fade out
+static float fadeInEndOrMatch(float inStart, float inEnd, float outStart, float outEnd,
+                              int outSeconds, int inSeconds)
+{
+    if (inStart < 0.0f || inEnd > inStart || outStart < 0.0f || outEnd <= outStart)
+        return inEnd;
+
+    const double ratio = outSeconds > 0 && inSeconds > 0 ? (double)outSeconds / inSeconds : 1.0;
+    return (float)juce::jmin(1.0, inStart + (outEnd - outStart) * ratio);
+}
+
 // ── Construction ──────────────────────────────────────────────────────────────
 
 MixingPage::MixingPage()
@@ -29,9 +46,7 @@ MixingPage::MixingPage()
                 return;
 
             // Ask MainComponent to play the selected audio file
-            if (!onPlaySong || !onPlaySong(song,
-                                           incomingFadeInStart, incomingFadeInEnd,
-                                           chart1.getFadeStart(), chart1.getFadeEnd()))
+            if (!playCurrentSong())
                 juce::AlertWindow::showMessageBoxAsync(
                     juce::MessageBoxIconType::WarningIcon,
                     "Unable to play song",
@@ -147,11 +162,15 @@ void MixingPage::setContent(Playlist* playlist, int songIndex)
     const bool advancingToNext = playlist != nullptr && playlist == currentPlaylist
                              && songIndex == currentIndex + 1;
     const float nextFadeInStart = chart2.getFadeStart();
-    const float nextFadeInEnd = chart2.getFadeEnd();
+    const float nextFadeInEnd = fadeInEndOrMatch(nextFadeInStart, chart2.getFadeEnd(),
+                                                 chart1.getFadeStart(), chart1.getFadeEnd(),
+                                                 songSeconds(currentPlaylist, currentIndex),
+                                                 songSeconds(currentPlaylist, currentIndex + 1));
 
     if (onStop) onStop();
     currentPlaylist = playlist;
     currentIndex    = songIndex;
+    loadSongSettings();
     incomingFadeInStart = -1.0f;
     incomingFadeInEnd   = -1.0f;
 
@@ -177,8 +196,12 @@ void MixingPage::setContent(Playlist* playlist, int songIndex)
                 songs[songIndex - 1].title, songs[songIndex].title);
             if (!incomingTransitions.isEmpty())
             {
-                incomingFadeInStart = incomingTransitions[0].fadeInStart;
-                incomingFadeInEnd = incomingTransitions[0].fadeInEnd;
+                const auto& t = incomingTransitions.getReference(0);
+                incomingFadeInStart = t.fadeInStart;
+                incomingFadeInEnd = fadeInEndOrMatch(t.fadeInStart, t.fadeInEnd,
+                                                     t.fadeOutStart, t.fadeOutEnd,
+                                                     songs[songIndex - 1].durationSeconds,
+                                                     songs[songIndex].durationSeconds);
             }
         }
 
@@ -231,7 +254,7 @@ void MixingPage::jumpTo(float position)
 
     // start the song if it isnt playing yet then move to the spot
     // position is 0 to 1 across the chart
-    if (! onPlaySong || ! onPlaySong(currentPlaylist->songs[currentIndex], getSliderSettings()))
+    if (! playCurrentSong())
         return;
 
     if (onSeek && getPlaybackLength)
@@ -246,8 +269,19 @@ void MixingPage::skipToNext()
     const bool wasPlaying = currentSongIsLoaded() && isPlaybackActive && isPlaybackActive();
     setContent(currentPlaylist, currentIndex + 1); // this stops the old song
 
-    if (wasPlaying && onPlaySong)
-        onPlaySong(currentPlaylist->songs[currentIndex], getSliderSettings()); // the next songs own settings
+    if (wasPlaying)
+        playCurrentSong(); // the next songs own settings and its incoming fade
+}
+
+bool MixingPage::playCurrentSong()
+{
+    const auto* song = getCurrentSong();
+    if (song == nullptr || ! onPlaySong)
+        return false;
+
+    return onPlaySong(*song, getSliderSettings(),
+                      incomingFadeInStart, incomingFadeInEnd,
+                      chart1.getFadeStart(), chart1.getFadeEnd());
 }
 
 void MixingPage::timerCallback()
@@ -257,7 +291,52 @@ void MixingPage::timerCallback()
     const double length = getPlaybackLength();
     if (length <= 0.0) return;
 
-    chart1.setPlayhead((float)(getPlaybackPosition() / length));
+    const double progress = getPlaybackPosition() / length;
+    chart1.setPlayhead((float)progress);
+
+    // move on once the fade out has finished or the file has run out
+    const bool playing  = isPlaybackActive && isPlaybackActive();
+    const float fadeEnd = chart1.getFadeEnd();
+    const bool fadeDone = playing && chart1.getFadeStart() >= 0.0f && fadeEnd > 0.0f && progress >= fadeEnd;
+    const bool songDone = ! playing && progress >= 0.999; // not a pause in the middle
+    const bool hasNext  = currentIndex + 1 < currentPlaylist->songs.size();
+
+    // once the fade out starts, the next song comes in quietly underneath it
+    const float nextInStart = chart2.getFadeStart();
+    const float nextInEnd   = fadeInEndOrMatch(nextInStart, chart2.getFadeEnd(),
+                                               chart1.getFadeStart(), chart1.getFadeEnd(),
+                                               juce::roundToInt(length),
+                                               songSeconds(currentPlaylist, currentIndex + 1));
+    if (playing && hasNext && onCueNext && chart1.getFadeStart() >= 0.0f
+        && progress >= chart1.getFadeStart() && ! fadeDone
+        && nextInStart >= 0.0f && nextInEnd > nextInStart)
+        onCueNext(currentPlaylist->songs[currentIndex + 1], nextInStart, nextInEnd);
+
+    if (fadeDone || songDone)
+    {
+        if (hasNext)
+        {
+            // picks up chart2's fade in, and the engine takes over the incoming deck
+            setContent(currentPlaylist, currentIndex + 1);
+
+            // swapped in songs start with the dials neutral, saved settings are left alone
+            const SongSettings neutral;
+            volumeSlider.setValue(neutral.volume * 100.0, juce::dontSendNotification);
+            gainSlider  .setValue(neutral.gainDb,         juce::dontSendNotification);
+            speedSlider .setValue(neutral.speed * 100.0,  juce::dontSendNotification);
+            trebleSlider.setValue(neutral.trebleDb,       juce::dontSendNotification);
+            midsSlider  .setValue(neutral.midsDb,         juce::dontSendNotification);
+            bassSlider  .setValue(neutral.bassDb,         juce::dontSendNotification);
+            pitchSlider .setValue(0.0,                    juce::dontSendNotification);
+
+            playCurrentSong(); // applies the neutral dials to the audio
+        }
+        else if (onStop)
+        {
+            onStop(); // end of the playlist
+        }
+        return;
+    }
 
     // use the real length if the song didnt have one
     if (currentPlaylist->songs[currentIndex].durationSeconds <= 0)
@@ -323,15 +402,15 @@ void MixingPage::showTransitionPresets()
 {
     const auto s1 = chart1.getSongName();
     const auto s2 = chart2.getSongName();
-    if (s1.isEmpty() || s2.isEmpty()) return;
 
-    auto presets = getTransitionsForPair ? getTransitionsForPair(s1, s2)
-                                         : juce::Array<Transition>{};
+    // only presets made from song 1 into song 2, in this order
+    auto presets = getTransitionsForPair && s1.isNotEmpty() && s2.isNotEmpty()
+                 ? getTransitionsForPair(s1, s2) : juce::Array<Transition>{};
 
     juce::PopupMenu menu;
     if (presets.isEmpty())
     {
-        menu.addItem(1, "(no saved transitions)", false, false);
+        menu.addItem(1, "No Presets Saved", false, false);
         menu.showMenuAsync(juce::PopupMenu::Options()
             .withTargetComponent(&transitionPresetsButton), [](int){});
         return;

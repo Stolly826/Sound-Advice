@@ -191,9 +191,16 @@ void SongsPage::addTransitionToSong(const juce::String& s1Title, const Transitio
 
 void SongsPage::updateTransitionInSong(const juce::String& s1Title, int idx, const Transition& t)
 {
+    // idx counts only this pair's transitions, the same list getTransitionsForPair returns
     for (auto& song : songs)
-        if (song.title == s1Title && idx >= 0 && idx < song.transitions.size())
-            { song.transitions.set(idx, t); break; }
+        if (song.title == s1Title)
+        {
+            int pairIndex = 0;
+            for (int i = 0; i < song.transitions.size(); ++i)
+                if (song.transitions[i].toSongTitle == t.toSongTitle && pairIndex++ == idx)
+                    { song.transitions.set(i, t); break; }
+            break;
+        }
 
     saveLibrary();
 }

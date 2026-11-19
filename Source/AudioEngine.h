@@ -82,6 +82,10 @@ public:
     void stop();
     void scratch(double offsetSeconds);
 
+    // start the next song quietly on a second deck from its fade in point
+    // playSong with the same file later takes over from where this deck got to
+    bool cueNext(const juce::File& file, float fadeInStart, float fadeInEnd);
+
     // FRONTEND/BACKEND INTEGRATION: Speed, volume, gain and EQ for the current song
     void applySettings(const SongSettings& settings);
 
@@ -99,12 +103,16 @@ private:
     std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
     juce::AudioTransportSource transport;
     SongEffectsSource effects { transport };
+    FadeEnvelopeAudioSource fadeSource { effects, transport }; // fades sit after speed and EQ
+
+    // incoming deck that plays the next song during a transition
+    std::unique_ptr<juce::AudioFormatReaderSource> incomingReader;
+    juce::AudioTransportSource incomingTransport;
+    FadeEnvelopeAudioSource incomingFade { incomingTransport, incomingTransport };
+    juce::String incomingFilePath;
+
+    juce::MixerAudioSource mixer; // current deck + incoming deck
     juce::AudioSourcePlayer audioPlayer;
-    juce::IIRFilterAudioSource bassFilter{ &speedResampler, false };
-    juce::IIRFilterAudioSource midsFilter{ &bassFilter, false };
-    juce::IIRFilterAudioSource trebleFilter{ &midsFilter, false };
-    juce::ResamplingAudioSource speedResampler{ &transport, false, 2 };
-    FadeEnvelopeAudioSource fadeSource;
     juce::AudioDeviceManager deviceManager;
     juce::String deviceError;
     juce::String loadedFilePath;
