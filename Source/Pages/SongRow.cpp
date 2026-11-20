@@ -22,6 +22,14 @@ SongRow::SongRow(const Song& data) : song(data)
     titleLabel.setInterceptsMouseClicks(false, false);
     addAndMakeVisible(titleLabel);
 
+    explicitLabel.setText("EXPLICIT", juce::dontSendNotification);
+    explicitLabel.setFont(juce::FontOptions(9.0f, juce::Font::bold));
+    explicitLabel.setJustificationType(juce::Justification::centred);
+    explicitLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    explicitLabel.setColour(juce::Label::backgroundColourId, juce::Colours::darkred);
+    explicitLabel.setInterceptsMouseClicks(false, false);
+    addAndMakeVisible(explicitLabel);
+
     for (auto* l : { &artistLabel, &albumLabel, &dateLabel, &durationLabel })
     {
         l->setFont(juce::FontOptions(12.0f));
@@ -41,6 +49,7 @@ void SongRow::update(const Song& data)
 {
     song = data;
     titleLabel.setText(data.title, juce::dontSendNotification);
+    explicitLabel.setVisible(data.isExplicit());
     artistLabel.setText(data.artist, juce::dontSendNotification);
     albumLabel.setText(data.album, juce::dontSendNotification);
     dateLabel.setText(data.dateAdded.toString(true, false, false, false),
@@ -86,6 +95,11 @@ void SongRow::resized()
     area.removeFromRight(pad);
     artistLabel.setBounds(area.removeFromRight(artistW));
     area.removeFromRight(pad);
+    if (song.isExplicit())
+    {
+        explicitLabel.setBounds(area.removeFromLeft(60));
+        area.removeFromLeft(6);
+    }
     titleLabel.setBounds(area); // flex — whatever remains
 }
 

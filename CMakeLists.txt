@@ -20,6 +20,19 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
+set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(WHISPER_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+set(WHISPER_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build Whisper dependencies as static libraries" FORCE)
+FetchContent_Declare(
+    whisper_cpp
+    GIT_REPOSITORY https://github.com/ggerganov/whisper.cpp.git
+    GIT_TAG        v1.7.6
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(whisper_cpp)
+
 # ---------------------------------------------------------------------------
 # The app
 # ---------------------------------------------------------------------------
@@ -40,6 +53,8 @@ target_sources(SoundAdvice PRIVATE
     Source/MainComponent.h
     Source/AudioEngine.cpp
     Source/AudioEngine.h
+    Source/LocalTranscriber.cpp
+    Source/LocalTranscriber.h
     Source/Sidebar.cpp
     Source/Sidebar.h
     Source/SoundAdviceLookAndFeel.cpp
@@ -120,6 +135,7 @@ target_link_libraries(SoundAdvice
         juce::juce_audio_devices   # speakers / Core Audio / WASAPI
         juce::juce_dsp #audio processing for bass and stuff
         juce::juce_audio_utils     # waveform thumbnails, device selector UI
+        whisper
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags

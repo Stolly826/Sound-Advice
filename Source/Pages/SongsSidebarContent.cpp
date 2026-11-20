@@ -4,13 +4,13 @@ void SongsSidebarContent::updateSongs(const juce::Array<Song>& songs)
 {
     items = songs;
     hoveredIndex = -1;
+    firstVisibleIndex = 0;
     repaint();
 }
 
 int SongsSidebarContent::visibleCount() const
 {
-    const int maxH = (int)(getHeight() * kFillRatio);
-    return juce::jmin(maxH / kItemHeight, items.size());
+    return juce::jmin(getHeight() / (kItemHeight + 4), items.size());
 }
 
 int SongsSidebarContent::getItemIndexAt(juce::Point<int> pos) const
@@ -19,7 +19,7 @@ int SongsSidebarContent::getItemIndexAt(juce::Point<int> pos) const
     for (int i = 0; i < visibleCount(); ++i)
     {
         if (juce::Rectangle<int>(4, y, getWidth() - 8, kItemHeight).contains(pos))
-            return i;
+            return firstVisibleIndex + i;
         y += kItemHeight + 4; // matches paint loop
     }
     return -1;
@@ -30,9 +30,10 @@ void SongsSidebarContent::paint(juce::Graphics& g)
     int y = 0;
     for (int i = 0; i < visibleCount(); ++i)
     {
+        const int index = firstVisibleIndex + i;
         auto row = juce::Rectangle<int>(4, y, getWidth() - 8, kItemHeight);
 
-        g.setColour(juce::Colours::white.withAlpha(i == hoveredIndex ? 0.14f : 0.05f));
+        g.setColour(juce::Colours::white.withAlpha(index == hoveredIndex ? 0.14f : 0.05f));
         g.fillRoundedRectangle(row.toFloat(), 4.0f);
 
         const int textX     = row.getX() + 8;
@@ -41,17 +42,17 @@ void SongsSidebarContent::paint(juce::Graphics& g)
         const int titleH    = 16;
         const int artistGap = 2;
 
-        g.setColour(juce::Colours::white.withAlpha(i == hoveredIndex ? 1.0f : 0.80f));
+        g.setColour(juce::Colours::white.withAlpha(index == hoveredIndex ? 1.0f : 0.80f));
         g.setFont(juce::FontOptions(13.0f));
-        g.drawText(items[i].title,
+        g.drawText(items[index].title,
                    juce::Rectangle<int>(textX, titleY, textW, titleH),
                    juce::Justification::centredLeft, true);
 
-        if (items[i].artist.isNotEmpty())
+        if (items[index].artist.isNotEmpty())
         {
-            g.setColour(juce::Colours::white.withAlpha(i == hoveredIndex ? 0.65f : 0.45f));
+            g.setColour(juce::Colours::white.withAlpha(index == hoveredIndex ? 0.65f : 0.45f));
             g.setFont(juce::FontOptions(11.0f));
-            g.drawText(items[i].artist,
+            g.drawText(items[index].artist,
                        juce::Rectangle<int>(textX, titleY + titleH + artistGap, textW, 13),
                        juce::Justification::centredLeft, true);
         }
@@ -80,4 +81,14 @@ void SongsSidebarContent::mouseUp(const juce::MouseEvent& e)
     const int idx = getItemIndexAt(e.getPosition());
     if (idx >= 0 && onItemClicked)
         onItemClicked(idx);
+}
+
+void SongsSidebarContent::mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
+{
+    const int maxFirstIndex = juce::jmax(0, items.size() - visibleCount());
+    const int steps = juce::jmax(1, juce::roundToInt(juce::jmax(wheel.deltaY, -wheel.deltaY) * 3.0f));
+    const int direction = wheel.deltaY > 0.0f ? -1 : 1;
+    firstVisibleIndex = juce::jlimit(0, maxFirstIndex,
+        firstVisibleIndex + direction * steps);
+    repaint();
 }

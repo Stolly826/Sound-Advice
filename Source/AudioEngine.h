@@ -28,6 +28,13 @@ public:
     void setMids(float decibels);
     void setTreble(float decibels);
     void scratch(double offsetSeconds);
+    void setPosition(double seconds);
+
+    double getCurrentPosition() const { return transport.getCurrentPosition(); }
+    double getLengthInSeconds() const { return transport.getLengthInSeconds(); }
+    bool isPlaying() const { return transport.isPlaying(); }
+    bool isPaused() const { return paused; }
+    bool hasLoadedSong() const { return readerSource != nullptr; }
 
 private:
     juce::AudioFormatManager formatManager;

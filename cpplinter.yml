@@ -1,0 +1,31 @@
+name: C++ Linting
+
+on:
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - '**.cpp'
+      - '**.hpp'
+      - '**.cc'
+      - '**.h'
+
+jobs:
+  cpp-linter:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Run C/C++ Linter
+        uses: cpp-linter/cpp-linter-action@v2
+        id: linter
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          style: 'file'        # Uses your repository's local .clang-format
+          tidy-checks: ''     # Uses your repository's local .clang-tidy
+          version: '21'        # Pin to a specific LLVM/Clang version
+
+      - name: Fail workflow if checks failed
+        if: steps.linter.outputs.checks-failed > 0
+        run: exit 1

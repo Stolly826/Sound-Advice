@@ -33,6 +33,7 @@ private:
     Song        song;
     bool        hovered = false;
     juce::Label titleLabel;
+    juce::Label explicitLabel;
     juce::Label artistLabel;
     juce::Label albumLabel;
     juce::Label dateLabel;

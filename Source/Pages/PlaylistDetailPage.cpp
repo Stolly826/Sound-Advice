@@ -7,6 +7,29 @@ PlaylistDetailPage::PlaylistDetailPage()
     titleLabel.setFont(juce::FontOptions(24.0f, juce::Font::bold));
     addAndMakeVisible(titleLabel);
 
+    explicitFilterButton.onClick = [this]
+    {
+        hideExplicitSongs = !hideExplicitSongs;
+        explicitFilterButton.setButtonText(hideExplicitSongs ? "Show explicit" : "Hide explicit");
+        rebuildList();
+    };
+    addAndMakeVisible(explicitFilterButton);
+
+    explicitWordsButton.onClick = [this]
+    {
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::MessageBoxIconType::InfoIcon,
+            "Explicit word list",
+            juce::String("Songs are labeled explicit when their transcript contains one or more of these English words:\n\n")
+                + getExplicitWordListText());
+    };
+    addAndMakeVisible(explicitWordsButton);
+
+    emptyStateLabel.setText("No songs match this filter.", juce::dontSendNotification);
+    emptyStateLabel.setJustificationType(juce::Justification::centred);
+    emptyStateLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.45f));
+    addChildComponent(emptyStateLabel);
+
     listViewport.setViewedComponent(&listContainer, false);
     listViewport.setScrollBarsShown(true, false);
     addAndMakeVisible(listViewport);
@@ -14,11 +37,12 @@ PlaylistDetailPage::PlaylistDetailPage()
     listContainer.addAndMakeVisible(addSongRow);
     addSongRow.onClick = [this] { showPickSongDialog(); };
 
-    // Sidebar item click mirrors clicking the same song row.
+    // Sidebar navigation selects a playlist song; adding remains exclusive to the Add Song row.
     sidebarContent.onItemClicked = [this](int index)
     {
-        if (index >= 0 && index < rows.size())
-            if (rows[index]->onClicked) rows[index]->onClicked();
+        if (currentPlaylist != nullptr && juce::isPositiveAndBelow(index, visibleSongIndices.size())
+            && onSongClicked)
+            onSongClicked(currentPlaylist, visibleSongIndices[index]);
     };
 }
 
@@ -27,6 +51,11 @@ void PlaylistDetailPage::setPlaylist(Playlist* playlist)
     currentPlaylist = playlist;
     if (currentPlaylist != nullptr)
         titleLabel.setText(currentPlaylist->name, juce::dontSendNotification);
+    rebuildList();
+}
+
+void PlaylistDetailPage::refreshSongs()
+{
     rebuildList();
 }
 
@@ -39,6 +68,10 @@ void PlaylistDetailPage::resized()
 {
     auto area = getLocalBounds().reduced(16);
     titleLabel.setBounds(area.removeFromTop(40));
+    auto controls = area.removeFromTop(32);
+    explicitWordsButton.setBounds(controls.removeFromRight(142));
+    controls.removeFromRight(8);
+    explicitFilterButton.setBounds(controls.removeFromRight(112));
     area.removeFromTop(8);
     listViewport.setBounds(area);
 
@@ -49,6 +82,8 @@ void PlaylistDetailPage::resized()
     int totalH = pad + NewPlaylistRow::kHeight + pad;
     for (int i = 0; i < rows.size(); ++i)
         totalH += SongRow::kHeight + pad;
+    if (rows.isEmpty())
+        totalH += 44;
 
     listContainer.setSize(viewW, totalH);
 
@@ -61,30 +96,52 @@ void PlaylistDetailPage::resized()
         row->setBounds(4, y, rowW, SongRow::kHeight);
         y += SongRow::kHeight + pad;
     }
+
+    emptyStateLabel.setVisible(rows.isEmpty() && currentPlaylist != nullptr);
+    emptyStateLabel.setBounds(4, y, rowW, 36);
 }
 
 void PlaylistDetailPage::rebuildList()
 {
     rows.clear();
+    visibleSongIndices.clear();
 
     if (currentPlaylist == nullptr)
+    {
+        sidebarContent.updateSongs(juce::Array<Song>{});
+        resized();
         return;
+    }
+
+    emptyStateLabel.setText(currentPlaylist->songs.isEmpty()
+        ? "This playlist has no songs yet."
+        : "No non-explicit songs to show.",
+        juce::dontSendNotification);
 
     for (int i = 0; i < currentPlaylist->songs.size(); ++i)
     {
-        auto* row = rows.add(new SongRow(currentPlaylist->songs[i]));
+        const auto& song = currentPlaylist->songs[i];
+        if (hideExplicitSongs && song.isExplicit())
+            continue;
+
+        visibleSongIndices.add(i);
+        auto* row = rows.add(new SongRow(song));
         row->onDeleteClicked = [this, i] { handleDeleteRequest(i); };
         row->onClicked       = [this, i] { if (onSongClicked) onSongClicked(currentPlaylist, i); };
         listContainer.addAndMakeVisible(row);
     }
 
-    sidebarContent.updateSongs(currentPlaylist->songs);
+    juce::Array<Song> visibleSongs;
+    for (const auto index : visibleSongIndices)
+        visibleSongs.add(currentPlaylist->songs[index]);
+    sidebarContent.updateSongs(visibleSongs);
     resized();
 }
 
 void PlaylistDetailPage::handleDeleteRequest(int index)
 {
-    if (currentPlaylist == nullptr) return;
+    if (currentPlaylist == nullptr || !juce::isPositiveAndBelow(index, currentPlaylist->songs.size()))
+        return;
 
     juce::AlertWindow::showAsync(
         juce::MessageBoxOptions()
@@ -96,7 +153,8 @@ void PlaylistDetailPage::handleDeleteRequest(int index)
             .withAssociatedComponent(this),
         [this, index](int result)
         {
-            if (result == 1 && currentPlaylist != nullptr)
+            if (result == 1 && currentPlaylist != nullptr
+                && juce::isPositiveAndBelow(index, currentPlaylist->songs.size()))
             {
                 currentPlaylist->songs.remove(index);
                 currentPlaylist->lastUpdated = juce::Time::getCurrentTime();

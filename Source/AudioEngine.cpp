@@ -160,3 +160,15 @@ void AudioEngine::scratch(double offsetSeconds)
     //move playback
     transport.setPosition(newPosition);
 }
+
+void AudioEngine::setPosition(double seconds)
+{
+    if (!readerSource)
+        return;
+
+    const double songLength = transport.getLengthInSeconds();
+    if (songLength <= 0.0)
+        return;
+
+    transport.setPosition(juce::jlimit(0.0, songLength, seconds));
+}

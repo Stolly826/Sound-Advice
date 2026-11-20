@@ -20,6 +20,7 @@ public:
 
     PlaylistDetailPage();
     void setPlaylist(Playlist* playlist);
+    void refreshSongs();
 
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -30,12 +31,17 @@ private:
     Playlist* currentPlaylist = nullptr;
 
     juce::Label               titleLabel;
+    juce::TextButton          explicitFilterButton { "Hide explicit" };
+    juce::TextButton          explicitWordsButton { "Explicit word list" };
+    juce::Label               emptyStateLabel;
     juce::Component           listContainer;
     juce::Viewport            listViewport;
     NewPlaylistRow            addSongRow { "  Add Song" };
     juce::OwnedArray<SongRow> rows;
+    juce::Array<int> visibleSongIndices;
 
     SongsSidebarContent sidebarContent;
+    bool hideExplicitSongs = false;
 
     void rebuildList();
     void handleDeleteRequest(int index);

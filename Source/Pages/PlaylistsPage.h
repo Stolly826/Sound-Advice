@@ -20,6 +20,7 @@ public:
 
     // Returns the names of all playlists that contain a song matching by title+artist.
     juce::StringArray getPlaylistNamesContaining(const Song& song) const;
+    void updateSongTranscript(const Song& song);
 
 private:
     juce::OwnedArray<Playlist>    playlists; // OwnedArray keeps pointers stable
