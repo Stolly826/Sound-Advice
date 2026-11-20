@@ -15,12 +15,15 @@ struct Song
     juce::String title;
     juce::String artist;
     juce::String album;
+    juce::String genre;
     juce::String filePath;
     juce::String transcript;
     int          releaseYear     = 0; // 0 = unknown
     juce::Time              dateAdded;
     int                     durationSeconds = 0; // 0 = unknown
     juce::Array<Transition> transitions;
+    juce::Image             image;     // isNull() when the song has no picture
+    juce::File              imageFile; // copy of the picture in the library images folder
 
     juce::StringArray getExplicitWords() const
     {

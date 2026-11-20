@@ -5,6 +5,8 @@
 
 // One row in a playlist's song list.
 // Layout: [icon | title | artist | album | date | duration | trash]
+// stacked layout for narrow lists like the add song picker:
+// [icon | title over album | artist | date | duration]
 class SongRow : public juce::Component
 {
 public:
@@ -17,6 +19,9 @@ public:
 
     explicit SongRow(const Song& data);
     void update(const Song& data);
+
+    // album goes under the title in smaller text, bigger title and artist, no trash can
+    void setStackedLayout(bool shouldStack);
 
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -37,6 +42,7 @@ private:
 
     Song        song;
     bool        hovered = false;
+    bool        stacked = false;
     juce::Label titleLabel;
     juce::Label explicitLabel;
     juce::Label artistLabel;
@@ -48,4 +54,16 @@ private:
     static void drawMusicNote(juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SongRow)
+};
+
+// white line showing where a dragged song will land in a list of SongRows
+class SongDropIndicator : public juce::Component
+{
+public:
+    SongDropIndicator() { setInterceptsMouseClicks(false, false); }
+    void paint(juce::Graphics& g) override
+    {
+        g.setColour(juce::Colours::white);
+        g.fillRoundedRectangle(getLocalBounds().toFloat(), 1.5f);
+    }
 };

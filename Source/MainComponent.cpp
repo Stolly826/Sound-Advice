@@ -110,7 +110,16 @@ MainComponent::MainComponent()
     playlistDetailPage.getAllSongs   = [this]() { return songsPage.getSongs(); };
     // order changes and added songs get saved
     playlistDetailPage.onPlaylistChanged = [this] { playlistsPage.playlistChanged(); };
-    playlistDetailPage.addSongToLibrary  = [this](Song& s) { return songsPage.addSongToLibrary(s); };
+    playlistDetailPage.addSongToLibrary  = [this](Song s, std::function<void(const Song&)> onAdded)
+    {
+        songsPage.addSongToLibrary(std::move(s), std::move(onAdded));
+    };
+    // a duplicate upload replaced a song, playlists that had it get the new one
+    songsPage.onSongReplaced = [this](const Song& oldSong, const Song& newSong)
+    {
+        playlistsPage.replaceSong(oldSong, newSong);
+        playlistDetailPage.refreshSongs();
+    };
     playlistDetailPage.onEditClicked     = [this](Playlist* p)
     {
         playlistsPage.showEditDialog(p, &playlistDetailPage, [this] { playlistDetailPage.refreshHeader(); });

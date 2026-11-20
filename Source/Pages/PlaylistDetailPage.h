@@ -5,11 +5,13 @@
 #include "SongRow.h"
 #include "NewPlaylistRow.h"
 #include "SongsSidebarContent.h"
+#include "SongSort.h"
 
 // Shows all songs in a single playlist.
 // Call setPlaylist() before making the page visible.
 // sidebar shows the whole library drag a song from it into the list
-// drag rows in the list to change the order
+// drag rows in the list to change the order (custom order only)
+// the sort dropdown picks how songs are shown and is saved with the playlist
 class PlaylistDetailPage : public juce::Component,
                            public juce::DragAndDropTarget
 {
@@ -27,8 +29,9 @@ public:
     // edit button main component opens the edit dialog
     std::function<void(Playlist*)> onEditClicked;
 
-    // add new song puts it in the library first false if that failed
-    std::function<bool(Song&)> addSongToLibrary;
+    // add new song puts it in the library first
+    // the callback gets the stored song and isnt called if it wasnt added eg a skipped duplicate
+    std::function<void(Song, std::function<void(const Song&)>)> addSongToLibrary;
 
     // FRONTEND/BACKEND INTEGRATION: reads tags for the add song dialog (set by MainComponent)
     std::function<Song(const juce::File&)> readSongDetails;
@@ -37,7 +40,7 @@ public:
     void setPlaylist(Playlist* playlist);
     void refreshSongs();
 
-    // redo title and group after an edit
+    // redo title group and description after an edit
     void refreshHeader();
 
     void paint(juce::Graphics& g) override;
@@ -52,22 +55,14 @@ public:
     void itemDropped(const SourceDetails& details) override;
 
 private:
-    // white line showing where a dropped song will go
-    struct DropIndicator : public juce::Component
-    {
-        DropIndicator() { setInterceptsMouseClicks(false, false); }
-        void paint(juce::Graphics& g) override
-        {
-            g.setColour(juce::Colours::white);
-            g.fillRoundedRectangle(getLocalBounds().toFloat(), 1.5f);
-        }
-    };
-
     Playlist* currentPlaylist = nullptr;
     juce::Array<Song> librarySongs; // whats in the sidebar
 
     juce::Label               titleLabel;
     juce::Label               subtitleLabel; // group and song count
+    juce::Label               descriptionLabel;
+    juce::Label               sortLabel { {}, "Sort by" };
+    juce::ComboBox            sortBox;
     juce::TextButton          editButton { "Edit" };
     juce::TextButton          explicitFilterButton { "Hide explicit" };
     juce::TextButton          explicitWordsButton { "Explicit word list" };
@@ -76,11 +71,15 @@ private:
     juce::Viewport            listViewport;
     NewPlaylistRow            addSongRow { "  Add Song" };
     juce::OwnedArray<SongRow> rows;
-    DropIndicator             dropIndicator;
+    SongDropIndicator         dropIndicator;
     juce::Array<int>          visibleSongIndices; // playlist index of each shown row
 
     SongsSidebarContent sidebarContent;
     bool hideExplicitSongs = false;
+
+    SongSortMode getSortMode() const;
+    bool isCustomOrder() const { return getSortMode() == SongSortMode::custom; }
+    int  getDescriptionHeight(int width) const; // 0 when there is no description
 
     void rebuildList();
     void handleDeleteRequest(int index);

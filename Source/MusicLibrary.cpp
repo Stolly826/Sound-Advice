@@ -135,16 +135,20 @@ bool MusicLibrary::savePlaylists (const juce::OwnedArray<Playlist>& playlists) c
     return getPlaylistsFile().replaceWithText (juce::JSON::toString (juce::var (list)));
 }
 
-bool MusicLibrary::importPlaylistImage (Playlist& playlist)
+bool MusicLibrary::importImage (juce::File& imageFile, juce::Image& image)
 {
-    const juce::File source = playlist.imageFile;
+    const juce::File source = imageFile;
 
     // already ours nothing to copy
     if (source.isAChildOf (getImagesFolder()))
+    {
+        if (image.isNull())
+            image = juce::ImageFileFormat::loadFrom (source);
         return true;
+    }
 
-    const auto image = juce::ImageFileFormat::loadFrom (source);
-    if (image.isNull())
+    const auto loaded = juce::ImageFileFormat::loadFrom (source);
+    if (loaded.isNull())
         return false;
 
     getImagesFolder().createDirectory();
@@ -156,16 +160,86 @@ bool MusicLibrary::importPlaylistImage (Playlist& playlist)
         return false;
     }
 
-    playlist.imageFile = dest;
-    playlist.image     = image;
+    imageFile = dest;
+    image     = loaded;
     return true;
+}
+
+void MusicLibrary::deleteImage (const juce::File& imageFile) const
+{
+    // only our copies never the users original
+    if (imageFile.isAChildOf (getImagesFolder()))
+        imageFile.deleteFile();
+}
+
+bool MusicLibrary::importPlaylistImage (Playlist& playlist)
+{
+    return importImage (playlist.imageFile, playlist.image);
 }
 
 void MusicLibrary::deletePlaylistImage (const Playlist& playlist) const
 {
-    // only our copies never the users original
-    if (playlist.imageFile.isAChildOf (getImagesFolder()))
-        playlist.imageFile.deleteFile();
+    deleteImage (playlist.imageFile);
+}
+
+bool MusicLibrary::importSongImage (Song& song)
+{
+    return importImage (song.imageFile, song.image);
+}
+
+void MusicLibrary::deleteSongImage (const Song& song) const
+{
+    deleteImage (song.imageFile);
+}
+
+juce::String MusicLibrary::imageFileToVar (const juce::File& imageFile) const
+{
+    if (imageFile.isAChildOf (getImagesFolder()))
+        return imageFile.getRelativePathFrom (getImagesFolder());
+    return {};
+}
+
+juce::File MusicLibrary::varToImageFile (const juce::String& stored) const
+{
+    return stored.isNotEmpty() ? getImagesFolder().getChildFile (stored) : juce::File();
+}
+
+int MusicLibrary::findSongWithSameFile (const juce::File& file, const juce::Array<Song>& songs) const
+{
+    if (! file.existsAsFile())
+        return -1;
+
+    for (int i = 0; i < songs.size(); ++i)
+    {
+        if (songs[i].filePath.isEmpty())
+            continue;
+
+        const juce::File existing (songs[i].filePath);
+        if (existing.existsAsFile() && filesHaveSameContents (file, existing))
+            return i;
+    }
+
+    return -1;
+}
+
+juce::File MusicLibrary::getPreferencesFile() const { return libraryFolder.getChildFile ("preferences.json"); }
+
+juce::String MusicLibrary::loadLibrarySortMode() const
+{
+    return juce::JSON::parse (getPreferencesFile())["librarySort"].toString();
+}
+
+bool MusicLibrary::saveLibrarySortMode (const juce::String& mode) const
+{
+    // keep anything else already in the file
+    auto prefs = juce::JSON::parse (getPreferencesFile());
+    if (prefs.getDynamicObject() == nullptr)
+        prefs = juce::var (new juce::DynamicObject());
+
+    prefs.getDynamicObject()->setProperty ("librarySort", mode);
+
+    libraryFolder.createDirectory();
+    return getPreferencesFile().replaceWithText (juce::JSON::toString (prefs));
 }
 
 juce::File MusicLibrary::getSettingsFile() const { return libraryFolder.getChildFile ("settings.json"); }
@@ -277,6 +351,37 @@ bool MusicLibrary::saveMixMarkers (const std::map<juce::String, Transition>& mix
     return getMixesFile().replaceWithText (juce::JSON::toString (juce::var (list)));
 }
 
+bool MusicLibrary::filesHaveSameContents (const juce::File& a, const juce::File& b)
+{
+    if (a == b)
+        return true;
+
+    // different sizes cant be the same file, this skips almost every song without reading it
+    if (a.getSize() != b.getSize())
+        return false;
+
+    std::ifstream inA (toStdPath (a), std::ios::binary);
+    std::ifstream inB (toStdPath (b), std::ios::binary);
+    if (! inA.is_open() || ! inB.is_open())
+        return false;
+
+    std::vector<char> bufA (64 * 1024), bufB (64 * 1024);
+    for (;;)
+    {
+        inA.read (bufA.data(), (std::streamsize) bufA.size());
+        inB.read (bufB.data(), (std::streamsize) bufB.size());
+
+        const auto countA = inA.gcount();
+        if (countA != inB.gcount())
+            return false;
+        if (countA == 0)
+            return true; // both finished with no difference
+
+        if (! std::equal (bufA.begin(), bufA.begin() + countA, bufB.begin()))
+            return false;
+    }
+}
+
 bool MusicLibrary::copyWithStreams (const juce::File& from, const juce::File& to)
 {
     // binary so windows doesnt mess with line ending bytes
@@ -307,6 +412,7 @@ juce::var MusicLibrary::songToVar (const Song& s) const
     obj->setProperty ("title",           s.title);
     obj->setProperty ("artist",          s.artist);
     obj->setProperty ("album",           s.album);
+    obj->setProperty ("genre",           s.genre);
     obj->setProperty ("releaseYear",     s.releaseYear);
     obj->setProperty ("dateAdded",       s.dateAdded.toMilliseconds());
     obj->setProperty ("durationSeconds", s.durationSeconds);
@@ -338,6 +444,10 @@ juce::var MusicLibrary::songToVar (const Song& s) const
     }
     obj->setProperty ("transitions", transitions);
 
+    const auto image = imageFileToVar (s.imageFile);
+    if (image.isNotEmpty())
+        obj->setProperty ("image", image);
+
     return juce::var (obj);
 }
 
@@ -349,8 +459,11 @@ juce::var MusicLibrary::playlistToVar (const Playlist& p) const
     obj->setProperty ("group",       p.group);
     obj->setProperty ("lastUpdated", p.lastUpdated.toMilliseconds());
 
-    if (p.imageFile.isAChildOf (getImagesFolder()))
-        obj->setProperty ("image", p.imageFile.getRelativePathFrom (getImagesFolder()));
+    const auto image = imageFileToVar (p.imageFile);
+    if (image.isNotEmpty())
+        obj->setProperty ("image", image);
+
+    obj->setProperty ("sort", p.sortMode);
 
     // songs in playlist order this is what saves the ordering
     juce::Array<juce::var> songs;
@@ -369,12 +482,11 @@ Playlist MusicLibrary::varToPlaylist (const juce::var& v) const
     p.group       = v["group"].toString();
     p.lastUpdated = juce::Time ((juce::int64) v["lastUpdated"]);
 
-    const auto image = v["image"].toString();
-    if (image.isNotEmpty())
-    {
-        p.imageFile = getImagesFolder().getChildFile (image);
-        p.image     = juce::ImageFileFormat::loadFrom (p.imageFile); // null if the file is gone
-    }
+    p.sortMode    = v["sort"].toString();
+
+    p.imageFile = varToImageFile (v["image"].toString());
+    if (p.imageFile != juce::File())
+        p.image = juce::ImageFileFormat::loadFrom (p.imageFile); // null if the file is gone
 
     if (auto* songs = v["songs"].getArray())
         for (const auto& sv : *songs)
@@ -389,6 +501,7 @@ Song MusicLibrary::varToSong (const juce::var& v) const
     s.title           = v["title"].toString();
     s.artist          = v["artist"].toString();
     s.album           = v["album"].toString();
+    s.genre           = v["genre"].toString();
     s.releaseYear     = (int) v["releaseYear"];
     s.dateAdded       = juce::Time ((juce::int64) v["dateAdded"]);
     s.durationSeconds = (int) v["durationSeconds"];
@@ -419,6 +532,11 @@ Song MusicLibrary::varToSong (const juce::var& v) const
             s.transitions.add (t);
         }
     }
+
+    // the same song is in the library and in playlists so share one loaded copy of its picture
+    s.imageFile = varToImageFile (v["image"].toString());
+    if (s.imageFile.existsAsFile())
+        s.image = juce::ImageCache::getFromFile (s.imageFile);
 
     return s;
 }

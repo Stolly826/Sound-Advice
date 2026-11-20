@@ -252,6 +252,32 @@ void PlaylistsPage::updateSongTranscript(const Song& updatedSong)
         rebuildList();
 }
 
+void PlaylistsPage::replaceSong(const Song& oldSong, const Song& newSong)
+{
+    bool anyChanged = false;
+    for (auto* playlist : playlists)
+    {
+        bool changed = false;
+        for (auto& song : playlist->songs)
+        {
+            if (songsHaveSameIdentity(song, oldSong))
+            {
+                song    = newSong;
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            playlist->lastUpdated = juce::Time::getCurrentTime();
+            anyChanged = true;
+        }
+    }
+
+    if (anyChanged)
+        playlistChanged(); // saves too
+}
+
 void PlaylistsPage::showNewPlaylistDialog()
 {
     auto* content = new NewPlaylistDialog(getGroupNames());

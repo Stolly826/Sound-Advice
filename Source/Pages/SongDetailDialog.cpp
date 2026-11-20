@@ -7,10 +7,10 @@ static constexpr int kHeaderH  = 20;
 static constexpr int kItemH    = 20;
 static constexpr int kTranscriptEditorHeight = 100;
 
-int SongDetailDialog::calcHeight(int numInfoLines, int numPlaylists, int numTransitions)
+int SongDetailDialog::calcHeight(int headerHeight, int numInfoLines, int numPlaylists, int numTransitions)
 {
     // Title row + labeled info rows + separator
-    const int topSection = 42 + (numInfoLines * kLineH) + kSepH * 2 + 1;
+    const int topSection = headerHeight + (numInfoLines * kLineH) + kSepH * 2 + 1;
     // "In Playlists:" header + at least one item line
     const int plSection  = kHeaderH + (juce::jmax(1, numPlaylists) * kItemH) + kSepH * 2 + 1;
     // "Transitions:" header + at least one item line
@@ -84,13 +84,7 @@ SongDetailDialog::SongDetailDialog(const Song& s,
     transcriptEditor.setTextToShowWhenEmpty("No transcript yet.", juce::Colours::grey);
     addAndMakeVisible(transcriptEditor);
 
-    int numInfo = 0;
-    if (s.artist.isNotEmpty())   ++numInfo;
-    if (s.album.isNotEmpty())    ++numInfo;
-    if (s.releaseYear > 0)       ++numInfo;
-    if (s.durationSeconds > 0)   ++numInfo;
-
-    setSize(kWidth, calcHeight(numInfo, playlistNames.size(), transitionNames.size()));
+    setSize(kWidth, calcHeight(getHeaderHeight(), getNumInfoLines(), playlistNames.size(), transitionNames.size()));
     updateTranscriptDetails();
 }
 
@@ -101,11 +95,31 @@ void SongDetailDialog::paint(juce::Graphics& g)
     const int w = getWidth() - kPad * 2;
     int y = kPad;
 
-    // ── Song name ──────────────────────────────────────────────────────────
-    g.setColour(juce::Colours::white);
-    g.setFont(juce::FontOptions(22.0f, juce::Font::bold));
-    g.drawText(song.title, kPad, y, w, 38, juce::Justification::centredLeft, true);
-    y += 42;
+    // ── Picture and song name ──────────────────────────────────────────────
+    if (! song.image.isNull())
+    {
+        juce::Path clip;
+        clip.addRoundedRectangle((float)kPad, (float)y, (float)kImageSize, (float)kImageSize, 6.0f);
+        g.saveState();
+        g.reduceClipRegion(clip);
+        g.setOpacity(1.0f);
+        g.drawImageWithin(song.image, kPad, y, kImageSize, kImageSize,
+                          juce::RectanglePlacement::centred | juce::RectanglePlacement::fillDestination);
+        g.restoreState();
+
+        const int textX = kPad + kImageSize + 14;
+        g.setColour(juce::Colours::white);
+        g.setFont(juce::FontOptions(22.0f, juce::Font::bold));
+        g.drawFittedText(song.title, textX, y, getWidth() - kPad - textX, kImageSize,
+                         juce::Justification::centredLeft, 3);
+    }
+    else
+    {
+        g.setColour(juce::Colours::white);
+        g.setFont(juce::FontOptions(22.0f, juce::Font::bold));
+        g.drawText(song.title, kPad, y, w, 38, juce::Justification::centredLeft, true);
+    }
+    y += getHeaderHeight();
 
     // ── Labeled info rows ──────────────────────────────────────────────────
     g.setFont(juce::FontOptions(13.0f));
@@ -121,6 +135,7 @@ void SongDetailDialog::paint(juce::Graphics& g)
 
     if (song.artist.isNotEmpty())   drawInfoRow("Artist:",   song.artist);
     if (song.album.isNotEmpty())    drawInfoRow("Album:",    song.album);
+    if (song.genre.isNotEmpty())    drawInfoRow("Genre:",    song.genre);
     if (song.releaseYear > 0)       drawInfoRow("Year:",     juce::String(song.releaseYear));
     if (song.durationSeconds > 0)   drawInfoRow("Duration:", formatSongDuration(song.durationSeconds));
 
@@ -194,11 +209,7 @@ void SongDetailDialog::paint(juce::Graphics& g)
 
 void SongDetailDialog::resized()
 {
-    const int numInfo = (song.artist.isNotEmpty() ? 1 : 0)
-                      + (song.album.isNotEmpty() ? 1 : 0)
-                      + (song.releaseYear > 0 ? 1 : 0)
-                      + (song.durationSeconds > 0 ? 1 : 0);
-    int y = kPad + 42 + numInfo * kLineH;
+    int y = kPad + getHeaderHeight() + getNumInfoLines() * kLineH;
     y += kSepH * 2 + 1;
     y += kHeaderH + juce::jmax(1, playlistNames.size()) * kItemH + kSepH * 2 + 1;
     y += kHeaderH + juce::jmax(1, transitionNames.size()) * kItemH + kSepH * 2 + 1;
@@ -212,6 +223,20 @@ void SongDetailDialog::resized()
 
     auto btnBounds = getLocalBounds().reduced(kPad);
     closeButton.setBounds(btnBounds.removeFromBottom(36).removeFromRight(100));
+}
+
+int SongDetailDialog::getHeaderHeight() const
+{
+    return song.image.isNull() ? 42 : kImageSize + 12;
+}
+
+int SongDetailDialog::getNumInfoLines() const
+{
+    return (song.artist.isNotEmpty() ? 1 : 0)
+         + (song.album.isNotEmpty() ? 1 : 0)
+         + (song.genre.isNotEmpty() ? 1 : 0)
+         + (song.releaseYear > 0 ? 1 : 0)
+         + (song.durationSeconds > 0 ? 1 : 0);
 }
 
 void SongDetailDialog::updateTranscriptDetails()

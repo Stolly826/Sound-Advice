@@ -37,6 +37,21 @@ SongsPage::SongsPage()
     titleLabel.setFont(juce::FontOptions(24.0f, juce::Font::bold));
     addAndMakeVisible(titleLabel);
 
+    // last sort choice comes back after a restart
+    sortMode = songSortModeFromId(library.loadLibrarySortMode());
+    fillSongSortBox(sortBox);
+    selectSongSortMode(sortBox, sortMode);
+    sortBox.onChange = [this]
+    {
+        sortMode = getSelectedSongSortMode(sortBox);
+        library.saveLibrarySortMode(songSortModeToId(sortMode));
+        rebuildList();
+    };
+    sortLabel.setJustificationType(juce::Justification::centredRight);
+    sortLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.6f));
+    addAndMakeVisible(sortLabel);
+    addAndMakeVisible(sortBox);
+
     listViewport.setViewedComponent(&listContainer, false);
     listViewport.setScrollBarsShown(true, false);
     addAndMakeVisible(listViewport);
@@ -44,7 +59,14 @@ SongsPage::SongsPage()
     listContainer.addAndMakeVisible(addSongRow);
     addSongRow.onClick = [this] { showAddSongDialog(); };
 
-    sidebarContent.onItemClicked = [this](int index) { showSongDetail(index); };
+    listContainer.addChildComponent(dropIndicator);
+
+    // sidebar is in the same order as the list
+    sidebarContent.onItemClicked = [this](int index)
+    {
+        if (juce::isPositiveAndBelow(index, displayOrder.size()))
+            showSongDetail(displayOrder[index]);
+    };
 
     rebuildList();
 }
@@ -57,7 +79,11 @@ void SongsPage::paint(juce::Graphics& g)
 void SongsPage::resized()
 {
     auto area = getLocalBounds().reduced(16);
-    titleLabel.setBounds(area.removeFromTop(40));
+    auto header = area.removeFromTop(40);
+    sortBox.setBounds(header.removeFromRight(150).withSizeKeepingCentre(150, 28));
+    header.removeFromRight(6);
+    sortLabel.setBounds(header.removeFromRight(60));
+    titleLabel.setBounds(header);
     area.removeFromTop(8);
     listViewport.setBounds(area);
 
@@ -69,7 +95,8 @@ void SongsPage::resized()
     for (int i = 0; i < rows.size(); ++i)
         totalH += SongRow::kHeight + pad;
 
-    listContainer.setSize(viewW, totalH);
+    // fill the viewport so drops below the last song still land
+    listContainer.setSize(viewW, juce::jmax(totalH, listViewport.getHeight()));
 
     int y = pad;
     addSongRow.setBounds(4, y, rowW, NewPlaylistRow::kHeight);
@@ -85,30 +112,127 @@ void SongsPage::resized()
 void SongsPage::rebuildList()
 {
     rows.clear();
+    dropIndicator.setVisible(false);
 
-    for (int i = 0; i < songs.size(); ++i)
+    displayOrder = getSortedSongOrder(songs, sortMode);
+
+    juce::Array<Song> shown; // sidebar matches the list
+    for (const int i : displayOrder)
     {
+        shown.add(songs[i]);
         auto* row = rows.add(new SongRow(songs[i]));
         row->onClicked       = [this, i] { showSongDetail(i); };
         row->onDeleteClicked = [this, i] { handleDeleteRequest(i); };
+        if (sortMode == SongSortMode::custom)
+            row->dragDescription = "row:" + juce::String(i); // drag to reorder
         listContainer.addAndMakeVisible(row);
     }
 
-    sidebarContent.updateSongs(songs);
+    dropIndicator.toFront(false);
+    sidebarContent.updateSongs(shown);
     resized();
 }
 
 void SongsPage::handleAddSong(Song s)
 {
-    addSongToLibrary(s);
+    addSongToLibrary(std::move(s));
 }
 
-bool SongsPage::addSongToLibrary(Song& s)
+void SongsPage::addSongToLibrary(Song s, std::function<void(const Song&)> onAdded)
 {
+    // same audio file already in the library, ask before adding it twice
+    const int duplicate = s.filePath.isNotEmpty()
+                        ? library.findSongWithSameFile(juce::File(s.filePath), songs)
+                        : -1;
+
+    if (duplicate < 0)
+    {
+        if (! importIntoLibrary(s)) return;
+
+        songs.insert(0, s);
+        saveLibrary();
+        rebuildList();
+        if (onAdded) onAdded(s);
+        return;
+    }
+
+    const Song existing = songs[duplicate];
+    juce::Component::SafePointer<SongsPage> safeThis(this);
+
+    juce::AlertWindow::showAsync(
+        juce::MessageBoxOptions()
+            .withIconType(juce::MessageBoxIconType::QuestionIcon)
+            .withTitle("Duplicate song")
+            .withMessage("This audio file is already in your library as \"" + existing.title + "\".\n\n"
+                         "Do you want to replace the old song with this one?")
+            .withButton("Replace")
+            .withButton("Don't Add")
+            .withAssociatedComponent(this),
+        [safeThis, existing, s, onAdded](int result) mutable
+        {
+            if (safeThis == nullptr) return;
+
+            if (result == 1)
+            {
+                safeThis->replaceSong(existing, std::move(s), std::move(onAdded));
+                return;
+            }
+
+            juce::AlertWindow::showAsync(
+                juce::MessageBoxOptions()
+                    .withIconType(juce::MessageBoxIconType::InfoIcon)
+                    .withTitle("Song not added")
+                    .withMessage("\"" + s.title + "\" wasn't added. Your library still has the original \""
+                                 + existing.title + "\".")
+                    .withButton("OK")
+                    .withAssociatedComponent(safeThis.getComponent()),
+                nullptr);
+        });
+}
+
+void SongsPage::replaceSong(const Song& oldSong, Song newSong, std::function<void(const Song&)> onAdded)
+{
+    // copy the new one in first so a failed copy doesnt lose the old song
+    if (! importIntoLibrary(newSong)) return;
+
+    for (int i = songs.size(); --i >= 0;)
+        if (songsHaveSameIdentity(songs[i], oldSong))
+            removeSongAt(i);
+
+    // then it goes in like any other upload
+    songs.insert(0, newSong);
+    saveLibrary();
+    rebuildList();
+
+    if (onSongReplaced) onSongReplaced(oldSong, newSong);
+    if (onAdded) onAdded(newSong);
+}
+
+void SongsPage::removeSongAt(int index)
+{
+    if (! juce::isPositiveAndBelow(index, songs.size())) return;
+
+    if (onSongRemoved) onSongRemoved(songs[index]);
+    library.deleteSongFile(songs[index]);  // remove the stored copy too
+    library.deleteSongImage(songs[index]);
+    songs.remove(index);
+}
+
+bool SongsPage::importIntoLibrary(Song& s)
+{
+    // the picture is optional keep the song without it if it cant be copied
+    if (s.imageFile != juce::File() && ! library.importSongImage(s))
+    {
+        s.image     = {};
+        s.imageFile = juce::File();
+    }
+
     // copy the picked file into the library folder
     // songs added without a file skip this
     if (s.filePath.isNotEmpty() && ! library.importSong(s))
     {
+        library.deleteSongImage(s); // dont keep a picture for a song that wasnt added
+
         juce::AlertWindow::showAsync(
             juce::MessageBoxOptions()
                 .withIconType(juce::MessageBoxIconType::WarningIcon)
@@ -120,9 +244,6 @@ bool SongsPage::addSongToLibrary(Song& s)
         return false;
     }
 
-    songs.insert(0, s);
-    saveLibrary();
-    rebuildList();
     return true;
 }
 
@@ -144,11 +265,9 @@ void SongsPage::handleDeleteRequest(int index)
             .withAssociatedComponent(this),
         [this, index](int result)
         {
-            if (result == 1)
+            if (result == 1 && juce::isPositiveAndBelow(index, songs.size()))
             {
-                if (onSongRemoved) onSongRemoved(songs[index]);
-                library.deleteSongFile(songs[index]); // remove the stored copy too
-                songs.remove(index);
+                removeSongAt(index);
                 saveLibrary();
                 rebuildList();
             }
@@ -169,6 +288,81 @@ void SongsPage::showAddSongDialog()
     opts.componentToCentreAround = this;
     opts.launchAsync();
 }
+
+//==============================================================================
+// drag rows to reorder, the order is saved to library.json as the custom order
+
+int SongsPage::getDropIndex(juce::Point<int> posInPage) const
+{
+    const auto pos = listContainer.getLocalPoint(this, posInPage);
+
+    // above the middle of a row means before it
+    for (int i = 0; i < rows.size(); ++i)
+        if (pos.y < rows[i]->getBounds().getCentreY())
+            return i;
+
+    return rows.size();
+}
+
+bool SongsPage::isInterestedInDragSource(const SourceDetails& details)
+{
+    return sortMode == SongSortMode::custom
+        && details.description.toString().startsWith("row:")
+        && details.sourceComponent != nullptr
+        && details.sourceComponent->getParentComponent() == &listContainer;
+}
+
+void SongsPage::itemDragMove(const SourceDetails& details)
+{
+    // scroll when dragging near the top or bottom
+    const auto inViewport = listViewport.getLocalPoint(this, details.localPosition);
+    listViewport.autoScroll(inViewport.x, inViewport.y, 30, 12);
+
+    const int pad   = 8;
+    const int index = getDropIndex(details.localPosition);
+    const int lineY = index < rows.size()
+                    ? rows[index]->getY() - pad / 2
+                    : (rows.isEmpty() ? addSongRow.getBottom() : rows.getLast()->getBottom()) + pad / 2;
+
+    dropIndicator.setBounds(4, lineY - 2, listContainer.getWidth() - 16, 3);
+    dropIndicator.setVisible(true);
+}
+
+void SongsPage::itemDragExit(const SourceDetails&)
+{
+    dropIndicator.setVisible(false);
+}
+
+void SongsPage::itemDropped(const SourceDetails& details)
+{
+    dropIndicator.setVisible(false);
+
+    // the dragged row is still handling its mouse up so rebuild just after
+    const int from = details.description.toString().fromFirstOccurrenceOf(":", false, false).getIntValue();
+    const int to   = getDropIndex(details.localPosition); // custom order so rows match songs
+
+    juce::Component::SafePointer<SongsPage> safeThis(this);
+    juce::MessageManager::callAsync([safeThis, from, to]
+    {
+        if (safeThis != nullptr) safeThis->moveSong(from, to);
+    });
+}
+
+void SongsPage::moveSong(int from, int to)
+{
+    if (! juce::isPositiveAndBelow(from, songs.size())) return;
+
+    // to is a slot between songs taking the song out shifts later slots up one
+    if (to > from) --to;
+    to = juce::jlimit(0, songs.size() - 1, to);
+    if (to == from) return;
+
+    songs.move(from, to);
+    saveLibrary();
+    rebuildList();
+}
+
+//==============================================================================
 
 juce::Array<Transition> SongsPage::getTransitionsForPair(const juce::String& s1,
                                                           const juce::String& s2) const

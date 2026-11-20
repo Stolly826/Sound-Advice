@@ -20,7 +20,7 @@ public:
     void paint  (juce::Graphics& g) override;
     void resized()                  override;
 
-    static constexpr int kWidth  = 520;
+    static constexpr int kWidth  = 700; // wide enough for the full title and artist
     static constexpr int kHeight = 520;
 
 private:

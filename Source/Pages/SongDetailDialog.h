@@ -23,7 +23,8 @@ public:
 
     // Calculate the exact height needed for this content so the
     // DialogWindow can be sized before showing.
-    static int calcHeight(int numInfoLines, int numPlaylists, int numTransitions);
+    // headerHeight is the title area, taller when the song has a picture
+    static int calcHeight(int headerHeight, int numInfoLines, int numPlaylists, int numTransitions);
 
 private:
     Song              song;
@@ -34,6 +35,10 @@ private:
     juce::Label       explicitWordsLabel;
     juce::TextEditor  transcriptEditor;
 
+    static constexpr int kImageSize = 96;
+
+    int getHeaderHeight() const;  // title row or picture with the title beside it
+    int getNumInfoLines() const;  // artist album genre year duration that are filled in
     void updateTranscriptDetails();
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SongDetailDialog)
 };

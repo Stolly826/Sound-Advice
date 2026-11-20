@@ -12,10 +12,17 @@ AddSongDialog::AddSongDialog()
     chooseFileButton.onClick = [this] { onChooseFile(); };
     addAndMakeVisible(chooseFileButton);
 
-    for (auto* l : { &titleLabel, &artistLabel, &albumLabel })
+    imageFilename.setText("No image selected", juce::dontSendNotification);
+    imageFilename.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.4f));
+    addAndMakeVisible(imageFilename);
+
+    imageButton.onClick = [this] { onChooseImage(); };
+    addAndMakeVisible(imageButton);
+
+    for (auto* l : { &titleLabel, &artistLabel, &albumLabel, &genreLabel })
         addAndMakeVisible(l);
 
-    for (auto* e : { &titleEditor, &artistEditor, &albumEditor })
+    for (auto* e : { &titleEditor, &artistEditor, &albumEditor, &genreEditor })
     {
         e->setReturnKeyStartsNewLine(false);
         addAndMakeVisible(e);
@@ -49,11 +56,14 @@ void AddSongDialog::paint(juce::Graphics& g)
     g.setFont(juce::FontOptions(11.0f));
     g.drawText("AUDIO FILE", kPad, kPad + 46, w, 16, juce::Justification::centredLeft);
 
-    // Separator between file section and manual fields
-    // y = kPad + title(42) + header(22) + button(40) + gap(6) + fileLabel(kLineH) + gap(10)
-    const int sepY = kPad + 42 + 22 + 40 + 6 + kLineH + 10;
+    // separators and the IMAGE header line up with resized()
     g.setColour(juce::Colours::grey.withAlpha(0.35f));
-    g.drawHorizontalLine(sepY, (float)kPad, (float)(getWidth() - kPad));
+    g.drawHorizontalLine(separator1Y, (float)kPad, (float)(getWidth() - kPad));
+    g.drawHorizontalLine(separator2Y, (float)kPad, (float)(getWidth() - kPad));
+
+    g.setColour(juce::Colours::white.withAlpha(0.4f));
+    g.setFont(juce::FontOptions(11.0f));
+    g.drawText("IMAGE", kPad, imageHeaderY, w, 16, juce::Justification::centredLeft);
 }
 
 void AddSongDialog::resized()
@@ -66,7 +76,18 @@ void AddSongDialog::resized()
     chooseFileButton.setBounds(area.removeFromTop(40));
     area.removeFromTop(6);
     fileNameLabel.setBounds(area.removeFromTop(kLineH));
-    area.removeFromTop(10 + 1 + 10); // separator space
+    area.removeFromTop(10);
+    separator1Y = area.getY();
+    area.removeFromTop(1 + 10);
+
+    imageHeaderY = area.getY();
+    area.removeFromTop(22); // "IMAGE" header
+    imageButton.setBounds(area.removeFromTop(40));
+    area.removeFromTop(6);
+    imageFilename.setBounds(area.removeFromTop(kLineH));
+    area.removeFromTop(10);
+    separator2Y = area.getY();
+    area.removeFromTop(1 + 10);
 
     auto field = [&](juce::Label& lbl, juce::TextEditor& ed)
     {
@@ -78,6 +99,7 @@ void AddSongDialog::resized()
     field(titleLabel,  titleEditor);
     field(artistLabel, artistEditor);
     field(albumLabel,  albumEditor);
+    field(genreLabel,  genreEditor);
 
     area.removeFromTop(4);
     auto btnRow = area.removeFromTop(36);
@@ -100,6 +122,36 @@ void AddSongDialog::onChooseFile()
             const auto result = fc.getResult();
             if (result.existsAsFile())
                 onFileChosen(result);
+        });
+}
+
+void AddSongDialog::onChooseImage()
+{
+    fileChooser = std::make_unique<juce::FileChooser>(
+        "Select a song image",
+        juce::File::getSpecialLocation(juce::File::userPicturesDirectory),
+        "*.png;*.jpg;*.jpeg");
+
+    fileChooser->launchAsync(
+        juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        [this](const juce::FileChooser& fc)
+        {
+            const auto result = fc.getResult();
+            if (! result.existsAsFile())
+                return;
+
+            const auto image = juce::ImageFileFormat::loadFrom(result);
+            if (image.isNull())
+            {
+                imageFilename.setText("That file isn't an image we can open", juce::dontSendNotification);
+                imageFilename.setColour(juce::Label::textColourId, juce::Colours::red.brighter(0.3f));
+                return;
+            }
+
+            selectedImage     = image;
+            selectedImageFile = result; // library copies it when the song is added
+            imageFilename.setText(result.getFileName(), juce::dontSendNotification);
+            imageFilename.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.85f));
         });
 }
 
@@ -137,6 +189,9 @@ void AddSongDialog::onAddClicked()
     s.title     = name.isNotEmpty() ? name : selectedFile.getFileNameWithoutExtension();
     s.artist    = artistEditor.getText().trim();
     s.album     = albumEditor.getText().trim();
+    s.genre     = genreEditor.getText().trim();
+    s.image     = selectedImage;
+    s.imageFile = selectedImageFile;
     s.filePath = selectedFile.existsAsFile() ? selectedFile.getFullPathName() : juce::String{}; //saves file full location jasen edit
     s.dateAdded = juce::Time::getCurrentTime();
     s.durationSeconds = selectedDuration;
