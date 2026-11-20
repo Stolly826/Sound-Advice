@@ -16,6 +16,29 @@ PlaylistDetailPage::PlaylistDetailPage()
     editButton.onClick = [this] { if (onEditClicked && currentPlaylist) onEditClicked(currentPlaylist); };
     addAndMakeVisible(editButton);
 
+    explicitFilterButton.onClick = [this]
+    {
+        hideExplicitSongs = !hideExplicitSongs;
+        explicitFilterButton.setButtonText(hideExplicitSongs ? "Show explicit" : "Hide explicit");
+        rebuildList();
+    };
+    addAndMakeVisible(explicitFilterButton);
+
+    explicitWordsButton.onClick = [this]
+    {
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::MessageBoxIconType::InfoIcon,
+            "Explicit word list",
+            juce::String("Songs are labeled explicit when their transcript contains one or more of these English words:\n\n")
+                + getExplicitWordListText());
+    };
+    addAndMakeVisible(explicitWordsButton);
+
+    emptyStateLabel.setText("No songs match this filter.", juce::dontSendNotification);
+    emptyStateLabel.setJustificationType(juce::Justification::centred);
+    emptyStateLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.45f));
+    listContainer.addChildComponent(emptyStateLabel); // sits under the last row
+
     listViewport.setViewedComponent(&listContainer, false);
     listViewport.setScrollBarsShown(true, false);
     addAndMakeVisible(listViewport);
@@ -38,6 +61,11 @@ void PlaylistDetailPage::setPlaylist(Playlist* playlist)
 {
     currentPlaylist = playlist;
     refreshHeader();
+    rebuildList();
+}
+
+void PlaylistDetailPage::refreshSongs()
+{
     rebuildList();
 }
 
@@ -69,6 +97,12 @@ void PlaylistDetailPage::resized()
     titleLabel.setBounds(header);
     subtitleLabel.setBounds(area.removeFromTop(18));
     area.removeFromTop(6);
+
+    auto controls = area.removeFromTop(32);
+    explicitWordsButton.setBounds(controls.removeFromRight(142));
+    controls.removeFromRight(8);
+    explicitFilterButton.setBounds(controls.removeFromRight(112));
+    area.removeFromTop(8);
     listViewport.setBounds(area);
 
     const int viewW = juce::jmax(1, listViewport.getMaximumVisibleWidth());
@@ -77,6 +111,8 @@ void PlaylistDetailPage::resized()
     int totalH = kPad + NewPlaylistRow::kHeight + kPad;
     for (int i = 0; i < rows.size(); ++i)
         totalH += SongRow::kHeight + kPad;
+    if (rows.isEmpty())
+        totalH += 44; // room for the empty message
 
     // fill the viewport so drops below the last song still land
     listContainer.setSize(viewW, juce::jmax(totalH, listViewport.getHeight()));
@@ -90,11 +126,15 @@ void PlaylistDetailPage::resized()
         row->setBounds(4, y, rowW, SongRow::kHeight);
         y += SongRow::kHeight + kPad;
     }
+
+    emptyStateLabel.setVisible(rows.isEmpty() && currentPlaylist != nullptr);
+    emptyStateLabel.setBounds(4, y, rowW, 36);
 }
 
 void PlaylistDetailPage::rebuildList()
 {
     rows.clear();
+    visibleSongIndices.clear();
     dropIndicator.setVisible(false);
 
     // refresh the library in the sidebar
@@ -102,11 +142,24 @@ void PlaylistDetailPage::rebuildList()
     sidebarContent.updateSongs(librarySongs);
 
     if (currentPlaylist == nullptr)
+    {
+        resized();
         return;
+    }
+
+    emptyStateLabel.setText(currentPlaylist->songs.isEmpty()
+        ? "This playlist has no songs yet."
+        : "No non-explicit songs to show.",
+        juce::dontSendNotification);
 
     for (int i = 0; i < currentPlaylist->songs.size(); ++i)
     {
-        auto* row = rows.add(new SongRow(currentPlaylist->songs[i]));
+        const auto& song = currentPlaylist->songs[i];
+        if (hideExplicitSongs && song.isExplicit())
+            continue;
+
+        visibleSongIndices.add(i);
+        auto* row = rows.add(new SongRow(song));
         row->onDeleteClicked = [this, i] { handleDeleteRequest(i); };
         row->onClicked       = [this, i] { if (onSongClicked) onSongClicked(currentPlaylist, i); };
         row->dragDescription = "row:" + juce::String(i); // drag to reorder
@@ -127,7 +180,8 @@ void PlaylistDetailPage::markChanged()
 
 void PlaylistDetailPage::handleDeleteRequest(int index)
 {
-    if (currentPlaylist == nullptr) return;
+    if (currentPlaylist == nullptr || !juce::isPositiveAndBelow(index, currentPlaylist->songs.size()))
+        return;
 
     juce::AlertWindow::showAsync(
         juce::MessageBoxOptions()
@@ -139,7 +193,8 @@ void PlaylistDetailPage::handleDeleteRequest(int index)
             .withAssociatedComponent(this),
         [this, index](int result)
         {
-            if (result == 1 && currentPlaylist != nullptr)
+            if (result == 1 && currentPlaylist != nullptr
+                && juce::isPositiveAndBelow(index, currentPlaylist->songs.size()))
             {
                 currentPlaylist->songs.remove(index);
                 markChanged();
@@ -243,9 +298,23 @@ void PlaylistDetailPage::itemDropped(const SourceDetails& details)
     });
 }
 
-void PlaylistDetailPage::applyDrop(const juce::String& desc, int index)
+int PlaylistDetailPage::toPlaylistIndex(int rowSlot) const
 {
-    const int from = desc.fromFirstOccurrenceOf(":", false, false).getIntValue();
+    if (currentPlaylist == nullptr) return 0;
+
+    // with explicit songs hidden the rows skip some songs
+    // dropping before a row means before that song, past the last row means just after the last shown song
+    if (juce::isPositiveAndBelow(rowSlot, visibleSongIndices.size()))
+        return visibleSongIndices[rowSlot];
+    if (! visibleSongIndices.isEmpty())
+        return visibleSongIndices.getLast() + 1;
+    return currentPlaylist->songs.size();
+}
+
+void PlaylistDetailPage::applyDrop(const juce::String& desc, int rowSlot)
+{
+    const int from  = desc.fromFirstOccurrenceOf(":", false, false).getIntValue();
+    const int index = toPlaylistIndex(rowSlot);
 
     if (desc.startsWith("library:") && from >= 0 && from < librarySongs.size())
         insertSong(librarySongs[from], index); // copy of the library song

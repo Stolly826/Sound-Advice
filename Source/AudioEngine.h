@@ -171,6 +171,7 @@ public:
     bool   isPaused() const    { return paused; }
     const juce::String& getLoadedFilePath() const { return loadedFilePath; }
     void   setPosition(double seconds); // jump to a time in the song
+    bool   hasLoadedSong() const { return readerSource != nullptr; } // mini player
 
 private:
     static constexpr double kScratchRangeSeconds = 3.0; // a bit more than the slider reaches

@@ -35,6 +35,7 @@ public:
 
     PlaylistDetailPage();
     void setPlaylist(Playlist* playlist);
+    void refreshSongs();
 
     // redo title and group after an edit
     void refreshHeader();
@@ -68,13 +69,18 @@ private:
     juce::Label               titleLabel;
     juce::Label               subtitleLabel; // group and song count
     juce::TextButton          editButton { "Edit" };
+    juce::TextButton          explicitFilterButton { "Hide explicit" };
+    juce::TextButton          explicitWordsButton { "Explicit word list" };
+    juce::Label               emptyStateLabel;
     juce::Component           listContainer;
     juce::Viewport            listViewport;
     NewPlaylistRow            addSongRow { "  Add Song" };
     juce::OwnedArray<SongRow> rows;
     DropIndicator             dropIndicator;
+    juce::Array<int>          visibleSongIndices; // playlist index of each shown row
 
     SongsSidebarContent sidebarContent;
+    bool hideExplicitSongs = false;
 
     void rebuildList();
     void handleDeleteRequest(int index);
@@ -88,6 +94,8 @@ private:
 
     // which slot a drop at this point would land in 0 to number of songs
     int getDropIndex(juce::Point<int> posInPage) const;
+    // row slot from getDropIndex to a position in the whole playlist (explicit filter can hide rows)
+    int toPlaylistIndex(int rowSlot) const;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PlaylistDetailPage)
 };

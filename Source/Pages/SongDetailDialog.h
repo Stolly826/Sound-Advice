@@ -12,6 +12,10 @@ public:
                      juce::StringArray inPlaylists,
                      juce::StringArray inTransitions);
 
+    std::function<void(const Song&, std::function<void(juce::Result, juce::String)>)>
+        onTranscribeRequested;
+    std::function<void(const Song&)> onSongUpdated;
+
     void paint(juce::Graphics& g) override;
     void resized() override;
 
@@ -26,11 +30,10 @@ private:
     juce::StringArray playlistNames;
     juce::StringArray transitionNames;
     juce::TextButton  closeButton { "Close" };
+    juce::TextButton  transcribeButton { "Transcribe audio" };
+    juce::Label       explicitWordsLabel;
+    juce::TextEditor  transcriptEditor;
 
-    // Vertical positions computed once in resized() and reused in paint().
-    int infoBottom    = 0;
-    int playlistsTop  = 0;
-    int transTop      = 0;
-
+    void updateTranscriptDetails();
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SongDetailDialog)
 };

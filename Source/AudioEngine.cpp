@@ -584,11 +584,15 @@ double AudioEngine::getPosition() const
                                     : transport.getCurrentPosition();
 }
 
-// jump to a time used by jump to and loop return
+// jump to a time used by jump to, loop return and the mini player
 void AudioEngine::setPosition(double seconds)
 {
     if (!readerSource || scratchSource.isActive())
         return;
 
-    transport.setPosition(juce::jlimit(0.0, transport.getLengthInSeconds(), seconds));
+    const double songLength = transport.getLengthInSeconds();
+    if (songLength <= 0.0)
+        return;
+
+    transport.setPosition(juce::jlimit(0.0, songLength, seconds));
 }

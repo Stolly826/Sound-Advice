@@ -226,6 +226,32 @@ juce::StringArray PlaylistsPage::getPlaylistNamesContaining(const Song& song) co
     return result;
 }
 
+void PlaylistsPage::updateSongTranscript(const Song& updatedSong)
+{
+    bool anyChanged = false;
+    for (auto* playlist : playlists)
+    {
+        bool changed = false;
+        for (auto& song : playlist->songs)
+        {
+            if (songsHaveSameIdentity(song, updatedSong))
+            {
+                song.transcript = updatedSong.transcript;
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            playlist->lastUpdated = juce::Time::getCurrentTime();
+            anyChanged = true;
+        }
+    }
+
+    if (anyChanged)
+        rebuildList();
+}
+
 void PlaylistsPage::showNewPlaylistDialog()
 {
     auto* content = new NewPlaylistDialog(getGroupNames());

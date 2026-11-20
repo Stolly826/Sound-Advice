@@ -20,15 +20,16 @@ public:
     void mouseMove(const juce::MouseEvent& e) override;
     void mouseExit(const juce::MouseEvent& e) override;
     void mouseUp(const juce::MouseEvent& e) override;
+    void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
     void mouseDrag(const juce::MouseEvent& e) override;
 
 private:
     juce::Array<Song> items;
     int hoveredIndex = -1;
+    int firstVisibleIndex = 0;
     bool dragEnabled = false;
 
     static constexpr int   kItemHeight = 38;
-    static constexpr float kFillRatio  = 0.8f;
 
     int visibleCount() const;
     int getItemIndexAt(juce::Point<int> pos) const;

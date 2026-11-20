@@ -23,6 +23,7 @@ public:
 
     // Returns the names of all playlists that contain a song matching by title+artist.
     juce::StringArray getPlaylistNamesContaining(const Song& song) const;
+    void updateSongTranscript(const Song& song);
 
     // every group name in use sorted
     juce::StringArray getGroupNames() const;

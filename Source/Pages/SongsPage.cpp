@@ -205,6 +205,25 @@ void SongsPage::updateTransitionInSong(const juce::String& s1Title, int idx, con
     saveLibrary();
 }
 
+void SongsPage::updateSongTranscript(const Song& updatedSong)
+{
+    bool changed = false;
+    for (auto& song : songs)
+    {
+        if (songsHaveSameIdentity(song, updatedSong))
+        {
+            song.transcript = updatedSong.transcript;
+            changed = true;
+        }
+    }
+
+    if (changed)
+        rebuildList();
+
+    if (onSongTranscriptChanged)
+        onSongTranscriptChanged(updatedSong);
+}
+
 void SongsPage::showSongDetail(int index)
 {
     if (index < 0 || index >= songs.size()) return;
@@ -213,6 +232,19 @@ void SongsPage::showSongDetail(int index)
     const auto playlists = getPlaylistsForSong ? getPlaylistsForSong(s) : juce::StringArray{};
 
     auto* content = new SongDetailDialog(s, playlists, {});
+    content->onSongUpdated = [this](const Song& updatedSong)
+    {
+        updateSongTranscript(updatedSong);
+    };
+    content->onTranscribeRequested = [this](
+        const Song& song,
+        std::function<void(juce::Result, juce::String)> completion)
+    {
+        if (onTranscribeSong)
+            onTranscribeSong(song, std::move(completion));
+        else
+            completion(juce::Result::fail("Local transcription is not configured."), {});
+    };
 
     juce::DialogWindow::LaunchOptions opts;
     opts.content.setOwned(content);
