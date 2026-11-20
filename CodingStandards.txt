@@ -1,0 +1,1 @@
+All C++ code to meet coding standards described by "C++ Coding Standard" Available at https://users.ece.cmu.edu/~eno/coding/CppCodingStandard.html
