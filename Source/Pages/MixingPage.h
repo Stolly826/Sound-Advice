@@ -13,7 +13,9 @@ class MixingPage : public juce::Component,
 public:
     std::function<juce::Array<Transition>(juce::String, juce::String)> getTransitionsForPair;
 
-    std::function<bool(const Song&, float, float, float, float)> onPlaySong;
+    // song, its settings, then fade in start/end and fade out start/end (0 to 1, -1 for none)
+    std::function<bool(const Song&, const SongSettings&, float, float, float, float)> onPlaySong;
+    std::function<bool(const Song&, float, float)> onCueNext; // next song, its fade in start/end
     std::function<void()> onPause;
     std::function<void()> onResume;
     std::function<void()> onStop;
@@ -96,6 +98,7 @@ private:
     const Song*  getCurrentSong() const;
     SongSettings getSliderSettings() const;
     void         loadSongSettings();
+    bool         playCurrentSong(); // plays with this songs settings and transition fades
 
     // playback extras on top of the audio engine
     bool currentSongIsLoaded() const; // engine has this pages song loaded

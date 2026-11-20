@@ -97,15 +97,15 @@ void TransitionsPage::showTransitionPresets()
 {
     const auto s1 = chart1.getSongName();
     const auto s2 = chart2.getSongName();
-    if (s1.isEmpty() || s2.isEmpty()) return;
 
-    auto presets = getTransitionsForPair ? getTransitionsForPair(s1, s2)
-                                         : juce::Array<Transition>{};
+    // only presets made from song 1 into song 2, in this order
+    auto presets = getTransitionsForPair && s1.isNotEmpty() && s2.isNotEmpty()
+                 ? getTransitionsForPair(s1, s2) : juce::Array<Transition>{};
 
     juce::PopupMenu menu;
     if (presets.isEmpty())
     {
-        menu.addItem(1, "(no saved transitions)", false, false);
+        menu.addItem(1, "No Presets Saved", false, false);
         menu.showMenuAsync(juce::PopupMenu::Options()
             .withTargetComponent(&transitionPresetsButton), [](int){});
         return;
@@ -171,7 +171,8 @@ void TransitionsPage::doSaveTransition(const juce::String& name)
     else if (addTransitionToSong)
     {
         addTransitionToSong(s1, t);
-        loadedTransitionIndex = -1; // new save; index unknown without re-fetching
+        // it was added last, so further saves update it instead of making copies
+        loadedTransitionIndex = getTransitionsForPair ? getTransitionsForPair(s1, s2).size() - 1 : -1;
         loadedTransitionName  = name;
         saveTransitionButton.setButtonText("Save Changes");
     }

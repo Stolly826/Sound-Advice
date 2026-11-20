@@ -88,7 +88,6 @@ void SongEffectsSource::updateFilters()
 }
 
 AudioEngine::AudioEngine()
-    : fadeSource(trebleFilter, transport)
 {
     // FRONTEND/BACKEND INTEGRATION: Recognise WAV, MP3, and other JUCE formats.
     formatManager.registerBasicFormats();
@@ -97,10 +96,10 @@ AudioEngine::AudioEngine()
     deviceError = deviceManager.initialiseWithDefaultDevices(0, 2);
     if (deviceError.isEmpty())
     {
-        setBass(0.0f);
-        setMids(0.0f);
-        setTreble(0.0f);
-        audioPlayer.setSource(&fadeSource);
+        // transport -> speed and EQ -> transition fades -> mixer -> speakers
+        mixer.addInputSource(&fadeSource, false);
+        mixer.addInputSource(&incomingFade, false);
+        audioPlayer.setSource(&mixer);
         deviceManager.addAudioCallback(&audioPlayer);
     }
 }
@@ -111,9 +110,13 @@ AudioEngine::~AudioEngine()
     if (deviceError.isEmpty())
         deviceManager.removeAudioCallback(&audioPlayer);
     audioPlayer.setSource(nullptr);
+    mixer.removeAllInputs();
     transport.stop();
     transport.setSource(nullptr);
     readerSource.reset();
+    incomingTransport.stop();
+    incomingTransport.setSource(nullptr);
+    incomingReader.reset();
     deviceManager.closeAudioDevice();
 }
 
@@ -126,7 +129,24 @@ bool AudioEngine::playSong(const juce::File& file,
 
     fadeSource.setFadePoints(fadeInStart, fadeInEnd, fadeOutStart, fadeOutEnd);
 
-    if (loadedFilePath != file.getFullPathName())
+    if (incomingReader && incomingFilePath == file.getFullPathName())
+    {
+        // the transition is over: carry on the incoming deck's song from where it got to
+        const double position = incomingTransport.getCurrentPosition();
+        incomingTransport.stop();
+        incomingTransport.setSource(nullptr);
+
+        transport.stop();
+        transport.setSource(nullptr);
+        readerSource = std::move(incomingReader);
+        transport.setSource(readerSource.get(), 0, nullptr,
+                            readerSource->getAudioFormatReader()->sampleRate);
+        transport.setPosition(position);
+        loadedFilePath = incomingFilePath;
+        incomingFilePath.clear();
+        paused = false;
+    }
+    else if (loadedFilePath != file.getFullPathName())
     {
         std::unique_ptr<juce::AudioFormatReader> reader(
             formatManager.createReaderFor(file));
@@ -148,8 +168,42 @@ bool AudioEngine::playSong(const juce::File& file,
     // A finished song should restart; a paused song resumes at its position.
     if (transport.hasStreamFinished())
         transport.setPosition(0.0);
+
+    // a song with an incoming transition starts at its fade in point, not silently at 0
+    const double length = transport.getLengthInSeconds();
+    if (fadeInStart >= 0.0f && fadeInEnd > fadeInStart
+        && transport.getCurrentPosition() < fadeInStart * length)
+        transport.setPosition(fadeInStart * length);
+
     transport.start();
     paused = false; // Play also resumes if already paused.
+    return true;
+}
+
+bool AudioEngine::cueNext(const juce::File& file, float fadeInStart, float fadeInEnd)
+{
+    if (!isReady() || !file.existsAsFile())
+        return false;
+
+    // already coming in, called every timer tick during the fade out
+    if (incomingFilePath == file.getFullPathName() && incomingTransport.isPlaying())
+        return true;
+
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
+    if (!reader)
+        return false;
+
+    const double sampleRate = reader->sampleRate;
+    incomingTransport.stop();
+    incomingTransport.setSource(nullptr);
+    incomingReader = std::make_unique<juce::AudioFormatReaderSource>(reader.release(), true);
+    incomingTransport.setSource(incomingReader.get(), 0, nullptr, sampleRate);
+    incomingFilePath = file.getFullPathName();
+
+    // starts silent at the fade in point and ramps up to full volume at the fade in end
+    incomingFade.setFadePoints(fadeInStart, fadeInEnd, -1.0f, -1.0f);
+    incomingTransport.setPosition(fadeInStart * incomingTransport.getLengthInSeconds());
+    incomingTransport.start();
     return true;
 }
 
@@ -219,6 +273,7 @@ void AudioEngine::pause()
     if (readerSource && transport.isPlaying())
     {
         transport.stop(); // Do not reset the position.
+        incomingTransport.stop(); // pause a transition in progress too
         paused = true;   // Remember this was a pause, not a normal Stop.
     }
 }
@@ -229,6 +284,8 @@ void AudioEngine::resume()
     if (readerSource && paused)
     {
         transport.start();
+        if (incomingReader)
+            incomingTransport.start();
         paused = false;
     }
 }
@@ -237,6 +294,7 @@ void AudioEngine::stop()
 {
     transport.stop();
     transport.setPosition(0.0); // Stop always starts over next time.
+    incomingTransport.stop();   // kept loaded so moving to the next song can take it over
     paused = false;
 }
 
