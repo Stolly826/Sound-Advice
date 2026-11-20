@@ -23,6 +23,8 @@ namespace {
     static constexpr int kNameH = 18;  // song name strip
     static constexpr int kLegH  = 18;  // legend + time strip
 
+    static constexpr int kCurveIdBase = 100; // menu result for a fade curve: 100 + curve number
+
     juce::String fmtTime(int secs)
     {
         return juce::String(secs / 60) + ":"
@@ -132,10 +134,12 @@ void SongChartComponent::setSongName(const juce::String& name)
     if (name != songName)
     {
         loopPoint = startPoint = fadeStart = fadeEnd = -1.0f;
+        fadeCurve  = FadeCurve::defaultCurve;
         isEditable = true;
     }
     songName = name;
-    selectSongButton.setVisible(name.isEmpty());
+    // only pages that can pick a song (transitions) get the button, the rest show a message
+    selectSongButton.setVisible(name.isEmpty() && onSelectSong != nullptr);
     changeSongButton.setVisible(name.isNotEmpty() && onSelectSong != nullptr);
     repaint();
 }
@@ -238,12 +242,14 @@ void SongChartComponent::applyTransition(const Transition& t)
         startPoint = t.startPoint;
         fadeStart  = t.fadeInStart;
         fadeEnd    = t.fadeInEnd;
+        fadeCurve  = t.fadeInCurve;
     }
     else
     {
         loopPoint  = t.loopPoint;
         fadeStart  = t.fadeOutStart;
         fadeEnd    = t.fadeOutEnd;
+        fadeCurve  = t.fadeOutCurve;
     }
     repaint();
 }
@@ -277,6 +283,7 @@ void SongChartComponent::resized()
     // "Select Song" centred in the chart data area
     auto ca = getChartArea();
     selectSongButton.setBounds(ca.withSizeKeepingCentre(120, 30));
+    selectSongButton.setVisible(songName.isEmpty() && onSelectSong != nullptr);
 }
 
 // ── Wave helpers ──────────────────────────────────────────────────────────────
@@ -367,19 +374,26 @@ void SongChartComponent::mouseDown(const juce::MouseEvent& e)
     const float t  = juce::jlimit(0.0f, 1.0f,
         ((float)e.x - (float)ca.getX()) / (float)ca.getWidth());
 
+    // hovering Start Fade In/Out opens the curve list to its right,
+    // clicking it straight away keeps the curve the fade already has
+    juce::PopupMenu curveMenu;
+    for (int c = 0; c < (int)FadeCurve::numCurves; ++c)
+        curveMenu.addItem(kCurveIdBase + c, getFadeCurveName((FadeCurve)c),
+                          true, fadeCurve == (FadeCurve)c);
+
     juce::PopupMenu menu;
     if (isNextSong)
     {
         menu.addItem(1, "Set Start");
         menu.addItem(2, "Set Loop");
-        menu.addItem(3, "Start Fade In");
+        menu.addSubMenu("Start Fade In", curveMenu, true, std::unique_ptr<juce::Drawable>{}, false, 3);
         menu.addItem(4, "End Fade In");
     }
     else
     {
         menu.addItem(1, "Jump To");
         menu.addItem(2, "Set Loop",       isEditable);
-        menu.addItem(3, "Start Fade Out", isEditable);
+        menu.addSubMenu("Start Fade Out", curveMenu, isEditable, std::unique_ptr<juce::Drawable>{}, false, 3);
         menu.addItem(4, "End Fade Out",   isEditable);
     }
 
@@ -388,6 +402,13 @@ void SongChartComponent::mouseDown(const juce::MouseEvent& e)
             .withTargetScreenArea({ e.getScreenX(), e.getScreenY(), 1, 1 }),
         [this, t](int result)
         {
+            // picking a curve also starts the fade here, with that shape
+            if (result >= kCurveIdBase)
+            {
+                fadeCurve = fadeCurveFromInt(result - kCurveIdBase);
+                result = 3;
+            }
+
             switch (result)
             {
                 case 1:
@@ -432,7 +453,17 @@ void SongChartComponent::paint(juce::Graphics& g)
                inner.getX(), inner.getY(), inner.getWidth(), kNameH,
                juce::Justification::centredLeft);
 
-    if (songName.isEmpty()) return;
+    if (songName.isEmpty())
+    {
+        // no way to pick one here (e.g. the end of a playlist on the mixing page)
+        if (onSelectSong == nullptr)
+        {
+            g.setColour(juce::Colours::white.withAlpha(0.4f));
+            g.setFont(juce::FontOptions(13.0f));
+            g.drawText("No Song Selected", ca, juce::Justification::centred);
+        }
+        return;
+    }
 
     const float cx   = (float)ca.getX();
     const float cy   = (float)ca.getY();
@@ -493,6 +524,48 @@ void SongChartComponent::paint(juce::Graphics& g)
         g.setColour(juce::Colours::white.withAlpha(0.4f));
         g.setFont(juce::FontOptions(12.0f));
         g.drawText(message, ca, juce::Justification::centred);
+    }
+
+    // ── Fade shape: the volume curve drawn between the fade markers ───────
+    if (fadeStart >= 0.0f && fadeEnd > fadeStart)
+    {
+        const float x0     = cx + fadeStart * cw;
+        const float x1     = cx + fadeEnd   * cw;
+        const float top    = cy + 4.0f;
+        const float bottom = cy + ch - 2.0f;
+        constexpr int steps = 48;
+
+        juce::Path curve;
+        for (int i = 0; i <= steps; ++i)
+        {
+            const float p     = (float)i / (float)steps;
+            const float level = isNextSong ? fadeInLevel(p, fadeCurve) : fadeOutLevel(p, fadeCurve);
+            const float x     = x0 + (x1 - x0) * p;
+            const float y     = bottom - (bottom - top) * level;
+            if (i == 0) curve.startNewSubPath(x, y);
+            else        curve.lineTo(x, y);
+        }
+
+        const juce::Colour fadeColour(0xffFF8C00);
+        juce::Path area(curve);
+        area.lineTo(x1, bottom);
+        area.lineTo(x0, bottom);
+        area.closeSubPath();
+        g.setColour(fadeColour.withAlpha(0.12f));
+        g.fillPath(area);
+        g.setColour(fadeColour.withAlpha(0.8f));
+        g.strokePath(curve, juce::PathStrokeType(1.5f));
+
+        // name the curve when the fade is wide enough to fit it
+        if (x1 - x0 > 70.0f)
+        {
+            g.setFont(juce::FontOptions(9.5f));
+            g.setColour(fadeColour.withAlpha(0.9f));
+            g.drawText(getFadeCurveName(fadeCurve), (int)x0 + 5, (int)top + 2,
+                       (int)(x1 - x0) - 8, 12,
+                       isNextSong ? juce::Justification::centredRight
+                                  : juce::Justification::centredLeft);
+        }
     }
 
     // ── Set-point markers ─────────────────────────────────────────────────

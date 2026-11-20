@@ -56,6 +56,10 @@ public:
     float getFadeEnd()    const { return fadeEnd; }
     double getFadeSeconds() const; // length of this chart's fade, 0 if it isnt fully placed
 
+    // shape of this chart's fade (fade out on chart 1, fade in on chart 2), picked separately
+    FadeCurve getFadeCurve() const { return fadeCurve; }
+    void      setFadeCurve(FadeCurve curve) { fadeCurve = curve; repaint(); }
+
     // When false the right-click menu is suppressed (used in MixingPage after preset applied).
     void setEditable(bool editable) { isEditable = editable; }
 
@@ -88,6 +92,7 @@ private:
     float          startPoint = -1.0f;
     float          fadeStart  = -1.0f;
     float          fadeEnd    = -1.0f;
+    FadeCurve      fadeCurve  = FadeCurve::defaultCurve;
 
     // real data for the graph
     enum class GraphState { noFile, loading, ready, failed };

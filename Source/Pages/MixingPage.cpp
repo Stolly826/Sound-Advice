@@ -94,6 +94,10 @@ MixingPage::MixingPage()
     addAndMakeVisible(chart2);
     transitionPresetsButton.onClick = [this] { showTransitionPresets(); };
     addAndMakeVisible(transitionPresetsButton);
+    presetNameLabel.setFont(juce::FontOptions(12.0f, juce::Font::bold));
+    presetNameLabel.setJustificationType(juce::Justification::centredRight);
+    presetNameLabel.setMinimumHorizontalScale(0.7f);
+    addAndMakeVisible(presetNameLabel);
 
     for (auto* l : { &controlsHeader, &eqHeader })
     {
@@ -198,6 +202,8 @@ void MixingPage::setContent(Playlist* playlist, int songIndex)
 {
     const bool advancingToNext = playlist != nullptr && playlist == currentPlaylist
                              && songIndex == currentIndex + 1;
+    const float nextStartPoint  = chart2.getStartPoint();
+    const auto  nextFadeInCurve = chart2.getFadeCurve();
     const float nextFadeInStart = chart2.getFadeStart();
     const float nextFadeInEnd = fadeInEndOrMatch(nextFadeInStart, chart2.getFadeEnd(),
                                                  chart1.getFadeStart(), chart1.getFadeEnd(),
@@ -211,10 +217,13 @@ void MixingPage::setContent(Playlist* playlist, int songIndex)
     loadSongSettings();
     incomingFadeInStart = -1.0f;
     incomingFadeInEnd   = -1.0f;
+    incomingStartPoint  = -1.0f;
+    incomingFadeInCurve = FadeCurve::defaultCurve;
 
     // Reset editable state when loading new content
     chart1.setEditable(true);
     chart2.setEditable(true);
+    presetNameLabel.setText({}, juce::dontSendNotification); // a new pair has no preset picked yet
 
     if (playlist != nullptr)
     {
@@ -222,11 +231,16 @@ void MixingPage::setContent(Playlist* playlist, int songIndex)
         const bool hasCurr = songIndex >= 0 && songIndex < songs.size();
         const bool hasNext = songIndex + 1 < songs.size();
 
-        if (hasCurr && advancingToNext && nextFadeInStart >= 0.0f
+        if (hasCurr && advancingToNext && nextStartPoint >= 0.0f)
+        {
+            incomingStartPoint = nextStartPoint; // a set start beats the fade in
+        }
+        else if (hasCurr && advancingToNext && nextFadeInStart >= 0.0f
             && nextFadeInEnd > nextFadeInStart)
         {
             incomingFadeInStart = nextFadeInStart;
             incomingFadeInEnd = nextFadeInEnd;
+            incomingFadeInCurve = nextFadeInCurve;
         }
         else if (hasCurr && songIndex > 0)
         {
@@ -236,7 +250,7 @@ void MixingPage::setContent(Playlist* playlist, int songIndex)
             if (getMixMarkers)
             {
                 t = getMixMarkers(songs[songIndex - 1], songs[songIndex]);
-                found = t.fadeInStart >= 0.0f;
+                found = t.fadeInStart >= 0.0f || t.startPoint >= 0.0f;
             }
             if (!found && getTransitionsForPair)
             {
@@ -248,8 +262,13 @@ void MixingPage::setContent(Playlist* playlist, int songIndex)
                 }
             }
 
-            if (found)
+            if (found && t.startPoint >= 0.0f)
             {
+                incomingStartPoint = t.startPoint; // a set start beats the fade in
+            }
+            else if (found)
+            {
+                incomingFadeInCurve = t.fadeInCurve;
                 incomingFadeInStart = t.fadeInStart;
                 incomingFadeInEnd = fadeInEndOrMatch(t.fadeInStart, t.fadeInEnd,
                                                      t.fadeOutStart, t.fadeOutEnd,
@@ -354,9 +373,18 @@ bool MixingPage::playCurrentSong()
     if (song == nullptr || ! onPlaySong)
         return false;
 
-    return onPlaySong(*song, getSliderSettings(),
-                      incomingFadeInStart, incomingFadeInEnd,
-                      chart1.getFadeStart(), chart1.getFadeEnd());
+    // with a set start the song just starts there at full volume, no fade in
+    const bool useStart = incomingStartPoint >= 0.0f;
+    if (! onPlaySong(*song, getSliderSettings(),
+                     useStart ? -1.0f : incomingFadeInStart,
+                     useStart ? -1.0f : incomingFadeInEnd,
+                     chart1.getFadeStart(), chart1.getFadeEnd(),
+                     incomingFadeInCurve, chart1.getFadeCurve()))
+        return false;
+
+    if (useStart && onSeek && getPlaybackLength)
+        onSeek(incomingStartPoint * getPlaybackLength());
+    return true;
 }
 
 void MixingPage::updatePlayButtonIcon()
@@ -397,10 +425,13 @@ void MixingPage::timerCallback()
                                                chart1.getFadeStart(), chart1.getFadeEnd(),
                                                juce::roundToInt(length),
                                                songSeconds(currentPlaylist, currentIndex + 1));
-    if (playing && hasNext && onCueNext && chart1.getFadeStart() >= 0.0f
+    // a set start on the next song means it doesn't fade in, it just starts when this one ends
+    if (playing && hasNext && onCueNext && chart2.getStartPoint() < 0.0f
+        && chart1.getFadeStart() >= 0.0f
         && progress >= chart1.getFadeStart() && ! fadeDone
         && nextInStart >= 0.0f && nextInEnd > nextInStart)
-        onCueNext(currentPlaylist->songs[currentIndex + 1], nextInStart, nextInEnd);
+        onCueNext(currentPlaylist->songs[currentIndex + 1], nextInStart, nextInEnd,
+                  chart2.getFadeCurve());
 
     if (fadeDone || songDone)
     {
@@ -548,6 +579,7 @@ void MixingPage::showTransitionPresets()
             const auto& t = presets[result - 1];
             chart1.applyTransition(t);
             chart2.applyTransition(t);
+            presetNameLabel.setText(t.name, juce::dontSendNotification);
             saveMixMarkers(); // switching away and back keeps the preset's markers too
             // Read-only after applying — no editing or saving in MixingPage
             chart1.setEditable(false);
@@ -571,6 +603,8 @@ void MixingPage::saveMixMarkers()
     t.startPoint   = chart2.getStartPoint();
     t.fadeInStart  = chart2.getFadeStart();
     t.fadeInEnd    = chart2.getFadeEnd();
+    t.fadeOutCurve = chart1.getFadeCurve();
+    t.fadeInCurve  = chart2.getFadeCurve();
     onMixMarkersChanged(*current, *next, t);
 }
 
@@ -626,6 +660,9 @@ void MixingPage::resized()
 
         scratchSlider.setBounds(row.removeFromLeft(
             juce::jmin(260, row.getWidth())));
+
+        row.removeFromLeft(12);
+        presetNameLabel.setBounds(row); // what's left, right next to the button
     }
     area.removeFromTop(6);
 

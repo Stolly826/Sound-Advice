@@ -17,9 +17,12 @@ public:
     std::function<Transition(const Song&, const Song&)>                     getMixMarkers;
     std::function<void(const Song&, const Song&, const Transition&)>        onMixMarkersChanged;
 
-    // song, its settings, then fade in start/end and fade out start/end (0 to 1, -1 for none)
-    std::function<bool(const Song&, const SongSettings&, float, float, float, float)> onPlaySong;
-    std::function<bool(const Song&, float, float)> onCueNext; // next song, its fade in start/end
+    // song, its settings, fade in start/end and fade out start/end (0 to 1, -1 for none),
+    // then the fade in curve and the fade out curve
+    std::function<bool(const Song&, const SongSettings&, float, float, float, float,
+                       FadeCurve, FadeCurve)> onPlaySong;
+    // next song, its fade in start/end and fade in curve
+    std::function<bool(const Song&, float, float, FadeCurve)> onCueNext;
     std::function<void()> onPause;
     std::function<void()> onResume;
     std::function<void()> onStop;
@@ -57,6 +60,8 @@ private:
     int       currentIndex    = 0;
     float     incomingFadeInStart = -1.0f;
     float     incomingFadeInEnd   = -1.0f;
+    float     incomingStartPoint  = -1.0f; // set start from the previous pair, beats the fade in
+    FadeCurve incomingFadeInCurve = FadeCurve::defaultCurve;
 
     // Header
     juce::Label      titleLabel;
@@ -69,6 +74,7 @@ private:
     SongChartComponent chart1;
     SongChartComponent chart2;
     juce::TextButton   transitionPresetsButton { "Transition Presets" };
+    juce::Label        presetNameLabel; // name of the preset in use, left of the button
 
     // Which song the sliders below change: 0 = current song (chart 1), 1 = next song (chart 2)
     int              controlledDeck = 0;

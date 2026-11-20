@@ -334,7 +334,8 @@ AudioEngine::~AudioEngine()
 
 bool AudioEngine::playSong(const juce::File& file,
                            float fadeInStart, float fadeInEnd,
-                           float fadeOutStart, float fadeOutEnd)
+                           float fadeOutStart, float fadeOutEnd,
+                           FadeCurve fadeInCurve, FadeCurve fadeOutCurve)
 {
     if (!isReady() || !file.existsAsFile())
         return false;
@@ -342,6 +343,7 @@ bool AudioEngine::playSong(const juce::File& file,
     if (scratchSource.isActive())
         endScratch();
 
+    fadeSource.setFadeCurves(fadeInCurve, fadeOutCurve);
     fadeSource.setFadePoints(fadeInStart, fadeInEnd, fadeOutStart, fadeOutEnd);
 
     if (incomingReader && incomingFilePath == file.getFullPathName())
@@ -398,7 +400,7 @@ bool AudioEngine::playSong(const juce::File& file,
 }
 
 bool AudioEngine::cueNext(const juce::File& file, float fadeInStart, float fadeInEnd,
-                          const SongSettings& settings)
+                          const SongSettings& settings, FadeCurve fadeInCurve)
 {
     if (!isReady() || !file.existsAsFile())
         return false;
@@ -420,6 +422,7 @@ bool AudioEngine::cueNext(const juce::File& file, float fadeInStart, float fadeI
     incomingFilePath = file.getFullPathName();
 
     // starts silent at the fade in point and ramps up to full volume at the fade in end
+    incomingFade.setFadeCurves(fadeInCurve, FadeCurve::defaultCurve);
     incomingFade.setFadePoints(fadeInStart, fadeInEnd, -1.0f, -1.0f);
     incomingTransport.setPosition(fadeInStart * incomingTransport.getLengthInSeconds());
     incomingTransport.start();
@@ -433,6 +436,12 @@ void FadeEnvelopeAudioSource::setFadePoints(float inStart, float inEnd,
     fadeInEnd.store(inEnd, std::memory_order_relaxed);
     fadeOutStart.store(outStart, std::memory_order_relaxed);
     fadeOutEnd.store(outEnd, std::memory_order_relaxed);
+}
+
+void FadeEnvelopeAudioSource::setFadeCurves(FadeCurve inCurve, FadeCurve outCurve)
+{
+    fadeInCurve.store((int)inCurve, std::memory_order_relaxed);
+    fadeOutCurve.store((int)outCurve, std::memory_order_relaxed);
 }
 
 void FadeEnvelopeAudioSource::prepareToPlay(int samplesPerBlockExpected, double sampleRate)
@@ -466,6 +475,9 @@ void FadeEnvelopeAudioSource::getNextAudioBlock(const juce::AudioSourceChannelIn
     if (!hasFadeIn && !hasFadeOut)
         return;
 
+    const auto inCurve  = fadeCurveFromInt(fadeInCurve.load(std::memory_order_relaxed));
+    const auto outCurve = fadeCurveFromInt(fadeOutCurve.load(std::memory_order_relaxed));
+
     const double positionDelta = positionAtEnd - positionAtStart;
     const int lastSample = juce::jmax(1, info.numSamples - 1);
     for (int sample = 0; sample < info.numSamples; ++sample)
@@ -475,12 +487,12 @@ void FadeEnvelopeAudioSource::getNextAudioBlock(const juce::AudioSourceChannelIn
                 (positionAtStart + positionDelta * sample / lastSample) / duration));
 
         float gain = 1.0f;
+        // each fade follows its own curve (default, linear, exponential, log or constant power)
+        // silent before a fade in starts and after a fade out ends, whatever the curve
         if (hasFadeIn)
-            gain *= juce::jlimit(0.0f, 1.0f,
-                (songProgress - inStart) / (inEnd - inStart));
+            gain *= fadeInLevel((songProgress - inStart) / (inEnd - inStart), inCurve);
         if (hasFadeOut)
-            gain *= 1.0f - juce::jlimit(0.0f, 1.0f,
-                (songProgress - outStart) / (outEnd - outStart));
+            gain *= fadeOutLevel((songProgress - outStart) / (outEnd - outStart), outCurve);
 
         for (int channel = 0; channel < info.buffer->getNumChannels(); ++channel)
             info.buffer->getWritePointer(channel, info.startSample)[sample] *= gain;

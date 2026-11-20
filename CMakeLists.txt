@@ -70,6 +70,7 @@ target_sources(SoundAdvice PRIVATE
     Source/MainComponent.h
     Source/AudioEngine.cpp
     Source/AudioEngine.h
+    Source/FadeCurve.h
     Source/LocalTranscriber.cpp
     Source/LocalTranscriber.h
     Source/Sidebar.cpp

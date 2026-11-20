@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_gui_basics/juce_gui_basics.h>
+#include "../FadeCurve.h"
 
 // All points are normalised 0–1 (position within the song), or -1 if unset.
 struct Transition
@@ -15,6 +16,10 @@ struct Transition
     float startPoint   = -1.0f; // next song: set-start marker
     float fadeInStart  = -1.0f; // next song: start of fade-in
     float fadeInEnd    = -1.0f; // next song: end of fade-in
+
+    // each fade's shape, picked separately (saved files without one load as linear)
+    FadeCurve fadeOutCurve = FadeCurve::defaultCurve;
+    FadeCurve fadeInCurve  = FadeCurve::defaultCurve;
 
     juce::Time savedAt;
 };
