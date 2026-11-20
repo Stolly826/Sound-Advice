@@ -11,6 +11,7 @@ struct SongSettings
     static constexpr double maxSpeed = 1.5;
     static constexpr double maxGainDb = 12.0;
     static constexpr double maxEqDb = 12.0;
+    static constexpr double maxPitch = 12.0; //semitones either way
 
     double speed = 1.0;     //1 is normal, changes the pitch too like a turntable
     double volume = 0.75;   //0 to 1, turns the song down from its normal level
@@ -18,6 +19,7 @@ struct SongSettings
     double bassDb = 0.0;
     double midsDb = 0.0;
     double trebleDb = 0.0;
+    double pitch = 0.0;     //semitones, moves the key without changing the speed
 
     juce::var toVar() const
     {
@@ -28,6 +30,7 @@ struct SongSettings
         obj->setProperty("bassDb", bassDb);
         obj->setProperty("midsDb", midsDb);
         obj->setProperty("trebleDb", trebleDb);
+        obj->setProperty("pitch", pitch);
         return juce::var(obj);
     }
 
@@ -41,6 +44,7 @@ struct SongSettings
         s.bassDb = juce::jlimit(-maxEqDb, maxEqDb, (double)v.getProperty("bassDb", s.bassDb));
         s.midsDb = juce::jlimit(-maxEqDb, maxEqDb, (double)v.getProperty("midsDb", s.midsDb));
         s.trebleDb = juce::jlimit(-maxEqDb, maxEqDb, (double)v.getProperty("trebleDb", s.trebleDb));
+        s.pitch = juce::jlimit(-maxPitch, maxPitch, (double)v.getProperty("pitch", s.pitch));
         return s;
     }
 };

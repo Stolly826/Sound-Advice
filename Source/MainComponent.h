@@ -42,6 +42,9 @@ private:
     //every songs speed, volume, gain and eq, kept in settings.json
     std::map<juce::String, SongSettings> songSettings;
 
+    //markers last placed on the mixing page for each pair of songs, kept in mixes.json
+    std::map<juce::String, Transition> mixMarkers;
+
     void showPage(juce::Component& page);
     void showPlaylistDetail(Playlist* playlist);
     void showMixingPage(Playlist* playlist, int songIndex);
