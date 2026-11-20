@@ -13,6 +13,26 @@ PlaylistDetailPage::PlaylistDetailPage()
     subtitleLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.5f));
     addAndMakeVisible(subtitleLabel);
 
+    descriptionLabel.setFont(juce::FontOptions(14.0f));
+    descriptionLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.8f));
+    descriptionLabel.setJustificationType(juce::Justification::topLeft);
+    descriptionLabel.setMinimumHorizontalScale(1.0f); // wrap instead of squashing the text
+    addAndMakeVisible(descriptionLabel);
+
+    fillSongSortBox(sortBox);
+    sortBox.onChange = [this]
+    {
+        if (currentPlaylist == nullptr) return;
+
+        // saved with the playlist so it opens the same way next time
+        currentPlaylist->sortMode = songSortModeToId(getSelectedSongSortMode(sortBox));
+        rebuildList();
+        if (onPlaylistChanged) onPlaylistChanged();
+    };
+    sortLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.6f));
+    addAndMakeVisible(sortLabel);
+    addAndMakeVisible(sortBox);
+
     editButton.onClick = [this] { if (onEditClicked && currentPlaylist) onEditClicked(currentPlaylist); };
     addAndMakeVisible(editButton);
 
@@ -60,6 +80,7 @@ PlaylistDetailPage::PlaylistDetailPage()
 void PlaylistDetailPage::setPlaylist(Playlist* playlist)
 {
     currentPlaylist = playlist;
+    selectSongSortMode(sortBox, getSortMode());
     refreshHeader();
     rebuildList();
 }
@@ -81,6 +102,31 @@ void PlaylistDetailPage::refreshHeader()
     if (currentPlaylist->group.isNotEmpty())
         sub = currentPlaylist->group + juce::String(juce::CharPointer_UTF8(" \xc2\xb7 ")) + sub;
     subtitleLabel.setText(sub, juce::dontSendNotification);
+
+    descriptionLabel.setText(currentPlaylist->description, juce::dontSendNotification);
+    resized(); // description height can change
+}
+
+SongSortMode PlaylistDetailPage::getSortMode() const
+{
+    return currentPlaylist != nullptr ? songSortModeFromId(currentPlaylist->sortMode)
+                                      : SongSortMode::custom;
+}
+
+int PlaylistDetailPage::getDescriptionHeight(int width) const
+{
+    const auto text = descriptionLabel.getText();
+    if (text.isEmpty() || width <= 0) return 0;
+
+    // measure the wrapped text, long descriptions stop at 4 lines
+    juce::AttributedString attributed;
+    attributed.append(text, descriptionLabel.getFont());
+    juce::TextLayout layout;
+    layout.createLayout(attributed, (float) width);
+
+    const int lineH = juce::roundToInt(descriptionLabel.getFont().getHeight()) + 2;
+    const int border = descriptionLabel.getBorderSize().getTopAndBottom();
+    return juce::jmin(juce::roundToInt(layout.getHeight()) + 4, lineH * 4) + border;
 }
 
 void PlaylistDetailPage::paint(juce::Graphics& g)
@@ -96,9 +142,21 @@ void PlaylistDetailPage::resized()
     editButton.setBounds(header.removeFromRight(70).withSizeKeepingCentre(70, 28));
     titleLabel.setBounds(header);
     subtitleLabel.setBounds(area.removeFromTop(18));
+
+    // description under the title, hidden when there isnt one
+    const int border = descriptionLabel.getBorderSize().getLeftAndRight();
+    const int descH  = getDescriptionHeight(area.getWidth() - border);
+    descriptionLabel.setVisible(descH > 0);
+    if (descH > 0)
+    {
+        area.removeFromTop(4);
+        descriptionLabel.setBounds(area.removeFromTop(descH));
+    }
     area.removeFromTop(6);
 
     auto controls = area.removeFromTop(32);
+    sortLabel.setBounds(controls.removeFromLeft(56));
+    sortBox.setBounds(controls.removeFromLeft(150).withSizeKeepingCentre(150, 28));
     explicitWordsButton.setBounds(controls.removeFromRight(142));
     controls.removeFromRight(8);
     explicitFilterButton.setBounds(controls.removeFromRight(112));
@@ -152,7 +210,7 @@ void PlaylistDetailPage::rebuildList()
         : "No non-explicit songs to show.",
         juce::dontSendNotification);
 
-    for (int i = 0; i < currentPlaylist->songs.size(); ++i)
+    for (const int i : getSortedSongOrder(currentPlaylist->songs, getSortMode()))
     {
         const auto& song = currentPlaylist->songs[i];
         if (hideExplicitSongs && song.isExplicit())
@@ -162,7 +220,8 @@ void PlaylistDetailPage::rebuildList()
         auto* row = rows.add(new SongRow(song));
         row->onDeleteClicked = [this, i] { handleDeleteRequest(i); };
         row->onClicked       = [this, i] { if (onSongClicked) onSongClicked(currentPlaylist, i); };
-        row->dragDescription = "row:" + juce::String(i); // drag to reorder
+        if (isCustomOrder())
+            row->dragDescription = "row:" + juce::String(i); // drag to reorder
         listContainer.addAndMakeVisible(row);
     }
 
@@ -235,6 +294,10 @@ void PlaylistDetailPage::moveSong(int from, int to)
 
 int PlaylistDetailPage::getDropIndex(juce::Point<int> posInPage) const
 {
+    // sorted lists have no in between spot, dropped songs go on the end
+    if (! isCustomOrder())
+        return rows.size();
+
     const auto pos = listContainer.getLocalPoint(this, posInPage);
 
     // above the middle of a row means before it
@@ -255,7 +318,8 @@ bool PlaylistDetailPage::isInterestedInDragSource(const SourceDetails& details)
     if (desc.startsWith("library:"))
         return details.sourceComponent.get() == &sidebarContent;
     if (desc.startsWith("row:"))
-        return details.sourceComponent != nullptr
+        return isCustomOrder()
+            && details.sourceComponent != nullptr
             && details.sourceComponent->getParentComponent() == &listContainer;
 
     return false;
@@ -313,11 +377,14 @@ int PlaylistDetailPage::toPlaylistIndex(int rowSlot) const
 
 void PlaylistDetailPage::applyDrop(const juce::String& desc, int rowSlot)
 {
+    if (currentPlaylist == nullptr) return;
+
     const int from  = desc.fromFirstOccurrenceOf(":", false, false).getIntValue();
     const int index = toPlaylistIndex(rowSlot);
 
+    // in a sorted list the slot means nothing so the song goes on the end of the custom order
     if (desc.startsWith("library:") && from >= 0 && from < librarySongs.size())
-        insertSong(librarySongs[from], index); // copy of the library song
+        insertSong(librarySongs[from], isCustomOrder() ? index : currentPlaylist->songs.size()); // copy of the library song
     else if (desc.startsWith("row:"))
         moveSong(from, index);
 }
@@ -350,9 +417,26 @@ void PlaylistDetailPage::showAddSongDialog()
     content->readSongDetails = readSongDetails;
     content->onCreated = [this](Song s)
     {
+        if (! addSongToLibrary)
+        {
+            handleAddSong(std::move(s));
+            return;
+        }
+
         // goes into the library too so the file gets copied and saved
-        if (addSongToLibrary && ! addSongToLibrary(s)) return;
-        handleAddSong(std::move(s));
+        // a duplicate asks first so this can finish later or not at all
+        juce::Component::SafePointer<PlaylistDetailPage> safeThis(this);
+        addSongToLibrary(std::move(s), [safeThis](const Song& stored)
+        {
+            if (safeThis == nullptr || safeThis->currentPlaylist == nullptr) return;
+
+            // replacing a duplicate already swapped it in where the old song was
+            for (const auto& existing : safeThis->currentPlaylist->songs)
+                if (songsHaveSameIdentity(existing, stored))
+                    return;
+
+            safeThis->handleAddSong(stored);
+        });
     };
 
     juce::DialogWindow::LaunchOptions opts;

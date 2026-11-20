@@ -76,6 +76,7 @@ void PlaylistRow::paint(juce::Graphics& g)
         clip.addRoundedRectangle((float)iconX, (float)iconY, (float)iconSize, (float)iconSize, 4.0f);
         g.saveState();
         g.reduceClipRegion(clip);
+        g.setOpacity(1.0f); // otherwise it uses the border colour's 30% alpha and looks grayed out
         g.drawImageWithin(playlist.image, iconX, iconY, iconSize, iconSize,
                           juce::RectanglePlacement::centred | juce::RectanglePlacement::fillDestination);
         g.restoreState();

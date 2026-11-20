@@ -108,6 +108,7 @@ target_sources(SoundAdvice PRIVATE
     Source/Pages/SongDetailDialog.h
     Source/Pages/SongRow.cpp
     Source/Pages/SongRow.h
+    Source/Pages/SongSort.h
     Source/Pages/SongsSidebarContent.cpp
     Source/Pages/SongsSidebarContent.h
     Source/Pages/SongsPage.cpp

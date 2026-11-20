@@ -37,6 +37,20 @@ public:
     // delete the stored copy only touches files inside the songs folder
     void deleteSongFile (const Song& song) const;
 
+    // index of the song in songs whose audio file has the same bytes as file
+    // -1 if none, songs with no file or a missing file are skipped
+    int findSongWithSameFile (const juce::File& file, const juce::Array<Song>& songs) const;
+
+    // copy song.imageFile into the images folder and load it
+    // false if the image cant be read or copied
+    bool importSongImage (Song& song);
+    void deleteSongImage (const Song& song) const;
+
+    // sort choice for the song library page, kept in preferences.json
+    juce::File   getPreferencesFile() const;
+    juce::String loadLibrarySortMode() const;
+    bool saveLibrarySortMode (const juce::String& mode) const;
+
     // playlists
     juce::File getImagesFolder() const;    // copied playlist images
     juce::File getPlaylistsFile() const;   // playlists.json
@@ -70,6 +84,17 @@ private:
 
     // byte for byte copy using ifstream and ofstream
     static bool copyWithStreams (const juce::File& from, const juce::File& to);
+
+    // true when both files have exactly the same bytes
+    static bool filesHaveSameContents (const juce::File& a, const juce::File& b);
+
+    // copy an image into the images folder, imageFile and image are updated on success
+    bool importImage (juce::File& imageFile, juce::Image& image);
+    void deleteImage (const juce::File& imageFile) const;
+
+    // stored image path <-> json, name only for our copies
+    juce::String imageFileToVar (const juce::File& imageFile) const;
+    juce::File   varToImageFile (const juce::String& stored) const;
 
     // song <-> json
     juce::var  songToVar (const Song& song) const;

@@ -12,4 +12,5 @@ struct Playlist
     juce::File        imageFile;    // copy of the image in the library folder
     juce::Time        lastUpdated;
     juce::Array<Song> songs;        // ordered list; newest additions go to the back
+    juce::String      sortMode;     // how the page shows the songs see SongSort.h, empty = custom order
 };

@@ -58,6 +58,28 @@ void SongRow::update(const Song& data)
                           juce::dontSendNotification);
 }
 
+void SongRow::setStackedLayout(bool shouldStack)
+{
+    stacked = shouldStack;
+
+    titleLabel.setFont(juce::FontOptions(stacked ? 16.0f : 14.0f, juce::Font::bold));
+    artistLabel.setFont(juce::FontOptions(stacked ? 14.0f : 12.0f));
+    if (stacked)
+        albumLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.55f));
+    else
+        albumLabel.removeColour(juce::Label::textColourId);
+
+    // stacked labels sit tight together so drop the default label padding
+    const juce::BorderSize<int> border = stacked ? juce::BorderSize<int>(0, 5, 0, 5) : juce::BorderSize<int>(1, 5, 1, 5);
+    titleLabel.setBorderSize(border);
+    albumLabel.setBorderSize(border);
+    titleLabel.setJustificationType(stacked ? juce::Justification::bottomLeft : juce::Justification::centredLeft);
+    albumLabel.setJustificationType(stacked ? juce::Justification::topLeft    : juce::Justification::centredLeft);
+
+    trashButton.setVisible(! stacked); // the picker has nothing to delete
+    resized();
+}
+
 void SongRow::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat().reduced(2.0f);
@@ -70,6 +92,20 @@ void SongRow::paint(juce::Graphics& g)
 
     const int iconSize = 32, iconX = 10;
     const int iconY    = (getHeight() - iconSize) / 2;
+    if (! song.image.isNull())
+    {
+        // images draw with the current colour's alpha so go back to fully opaque first
+        juce::Path clip;
+        clip.addRoundedRectangle((float)iconX, (float)iconY, (float)iconSize, (float)iconSize, 4.0f);
+        g.saveState();
+        g.reduceClipRegion(clip);
+        g.setOpacity(1.0f);
+        g.drawImageWithin(song.image, iconX, iconY, iconSize, iconSize,
+                          juce::RectanglePlacement::centred | juce::RectanglePlacement::fillDestination);
+        g.restoreState();
+        return;
+    }
+
     g.setColour(juce::Colours::grey.withAlpha(0.3f));
     g.fillRoundedRectangle((float)iconX, (float)iconY, (float)iconSize, (float)iconSize, 4.0f);
     drawMusicNote(g, { (float)iconX, (float)iconY, (float)iconSize, (float)iconSize },
@@ -84,6 +120,30 @@ void SongRow::resized()
 
     auto area = getLocalBounds().reduced(pad);
     area.removeFromLeft(iconX + iconSize + pad);
+
+    if (stacked)
+    {
+        // [title over album | artist | date | duration] title gets the most room
+        durationLabel.setBounds(area.removeFromRight(durationW));
+        area.removeFromRight(pad);
+        dateLabel.setBounds(area.removeFromRight(dateW));
+        area.removeFromRight(pad);
+        artistLabel.setBounds(area.removeFromRight(juce::jlimit(110, 200, area.getWidth() * 2 / 5)));
+        area.removeFromRight(pad);
+
+        auto titleArea = area;
+        auto albumArea = titleArea.removeFromBottom(song.album.isNotEmpty() ? titleArea.getHeight() * 2 / 5 : 0);
+        if (song.album.isEmpty())
+            titleLabel.setJustificationType(juce::Justification::centredLeft);
+        if (song.isExplicit())
+        {
+            explicitLabel.setBounds(titleArea.removeFromLeft(60).withSizeKeepingCentre(60, 16));
+            titleArea.removeFromLeft(6);
+        }
+        titleLabel.setBounds(titleArea);
+        albumLabel.setBounds(albumArea);
+        return;
+    }
 
     trashButton.setBounds(area.removeFromRight(trashW).withSizeKeepingCentre(trashW, trashW));
     area.removeFromRight(pad);

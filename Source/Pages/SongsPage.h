@@ -5,12 +5,15 @@
 #include "SongRow.h"
 #include "NewPlaylistRow.h"
 #include "SongsSidebarContent.h"
+#include "SongSort.h"
 #include "../MusicLibrary.h"
 
 // Global song library. Every song the user has ever added lives here.
 // Clicking a row opens a detail popup (name, artist, album, year,
 // which playlists it's in, and saved transitions).
-class SongsPage : public juce::Component
+// sort dropdown changes how the list is shown, in custom order rows can be dragged to reorder
+class SongsPage : public juce::Component,
+                  public juce::DragAndDropTarget
 {
 public:
     // Set by MainComponent so the detail dialog can query playlist membership.
@@ -23,15 +26,19 @@ public:
     std::function<Song(const juce::File&)> readSongDetails; // tags for the add song dialog
     std::function<void(const Song&)>       onSongRemoved;   // so its settings can go too
 
+    // a duplicate upload replaced oldSong, playlists should point at newSong instead
+    std::function<void(const Song& oldSong, const Song& newSong)> onSongReplaced;
+
     SongsPage();
     void paint(juce::Graphics& g) override;
     void resized() override;
 
     const juce::Array<Song>& getSongs() const { return songs; }
 
-    // copy the file in add to the library and save
-    // song is updated to point at the stored copy false if it failed
-    bool addSongToLibrary(Song& s);
+    // copy the file and picture in add to the library and save
+    // if the same audio file is already in the library the user is asked whether to replace the old song
+    // onAdded gets the stored song once its in, it isnt called if nothing was added
+    void addSongToLibrary(Song s, std::function<void(const Song&)> onAdded = nullptr);
 
     juce::Array<Transition> getTransitionsForPair(const juce::String& s1,
                                                    const juce::String& s2) const;
@@ -43,21 +50,38 @@ public:
 
     MusicLibrary& getLibrary() { return library; }
 
+    // drag rows to reorder, only in custom order
+    bool isInterestedInDragSource(const SourceDetails& details) override;
+    void itemDragMove(const SourceDetails& details) override;
+    void itemDragExit(const SourceDetails& details) override;
+    void itemDropped(const SourceDetails& details) override;
+
 private:
     MusicLibrary                  library; // saves songs to disk
     juce::Array<Song>             songs;
 
     juce::Label                   titleLabel;
+    juce::Label                   sortLabel { {}, "Sort by" };
+    juce::ComboBox                sortBox;
     juce::Component               listContainer;
     juce::Viewport                listViewport;
     NewPlaylistRow                addSongRow { "  New Song" };
     juce::OwnedArray<SongRow>     rows;
+    SongDropIndicator             dropIndicator;
+
+    SongSortMode                  sortMode = SongSortMode::custom;
+    juce::Array<int>              displayOrder; // songs index of each row on screen
 
     SongsSidebarContent sidebarContent;
 
     void rebuildList();
     void saveLibrary();
     void handleAddSong(Song s);
+    bool importIntoLibrary(Song& s);  // copies the file and picture, false if the file failed
+    void replaceSong(const Song& oldSong, Song newSong, std::function<void(const Song&)> onAdded);
+    void removeSongAt(int index);     // also deletes its stored file picture and settings
+    void moveSong(int from, int to);
+    int  getDropIndex(juce::Point<int> posInPage) const;
     void handleDeleteRequest(int index);
     void showAddSongDialog();
     void showSongDetail(int index);

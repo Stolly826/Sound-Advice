@@ -81,7 +81,8 @@ void PickSongDialog::applyFilter()
         if (query.isEmpty()
             || s.title.toLowerCase().contains(query)
             || s.artist.toLowerCase().contains(query)
-            || s.album.toLowerCase().contains(query))
+            || s.album.toLowerCase().contains(query)
+            || s.genre.toLowerCase().contains(query))
         {
             filtered.add(s);
         }
@@ -97,13 +98,13 @@ void PickSongDialog::rebuildRows()
     for (int i = 0; i < filtered.size(); ++i)
     {
         auto* row = rows.add(new SongRow(filtered[i]));
+        row->setStackedLayout(true); // album under the title so the title and artist fit
         row->onClicked = [this, i]
         {
             if (onSongPicked) onSongPicked(filtered[i]);
             if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
                 dw->exitModalState(0);
         };
-        // No onDeleteClicked — trash icon is visible but inert in picker context
         listContainer.addAndMakeVisible(row);
     }
 

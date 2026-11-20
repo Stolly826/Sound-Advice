@@ -16,7 +16,7 @@ public:
     void resized() override;
 
     static constexpr int kWidth  = 420;
-    static constexpr int kHeight = 400;
+    static constexpr int kHeight = 560;
 
 private:
     juce::TextButton chooseFileButton { "Choose Audio File" };
@@ -28,15 +28,26 @@ private:
     juce::TextEditor artistEditor;
     juce::Label      albumLabel  { {}, "Album" };
     juce::TextEditor albumEditor;
+    juce::Label      genreLabel  { {}, "Genre" };
+    juce::TextEditor genreEditor;
+
+    juce::TextButton imageButton { "Choose Image" };
+    juce::Label      imageFilename;
 
     juce::TextButton addButton    { "Add Song" };
     juce::TextButton cancelButton { "Cancel" };
 
     juce::File                         selectedFile;
     int                                selectedDuration = 0;
+    juce::Image                        selectedImage;
+    juce::File                         selectedImageFile;
     std::unique_ptr<juce::FileChooser> fileChooser;
 
+    // separator lines worked out in resized so paint matches the layout
+    int separator1Y = 0, separator2Y = 0, imageHeaderY = 0;
+
     void onChooseFile();
+    void onChooseImage();
     void onFileChosen(const juce::File& file);
     void onAddClicked();
 

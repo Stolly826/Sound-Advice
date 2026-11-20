@@ -25,6 +25,10 @@ public:
     juce::StringArray getPlaylistNamesContaining(const Song& song) const;
     void updateSongTranscript(const Song& song);
 
+    // a duplicate upload replaced oldSong in the library
+    // every playlist entry for oldSong becomes newSong in the same spot, then saves
+    void replaceSong(const Song& oldSong, const Song& newSong);
+
     // every group name in use sorted
     juce::StringArray getGroupNames() const;
 
