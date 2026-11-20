@@ -9,6 +9,7 @@
 #include <memory>
 #include <vector>
 #include "SongSettings.h"
+#include "FadeCurve.h"
 
 // Moves the key up or down without changing the speed.
 // Two read heads sweep through a short delay line at a different rate than it is
@@ -116,6 +117,7 @@ public:
         : input(inputSource), transport(audioTransport) {}
 
     void setFadePoints(float inStart, float inEnd, float outStart, float outEnd);
+    void setFadeCurves(FadeCurve inCurve, FadeCurve outCurve);
     void prepareToPlay(int samplesPerBlockExpected, double sampleRate) override;
     void releaseResources() override;
     void getNextAudioBlock(const juce::AudioSourceChannelInfo& info) override;
@@ -127,6 +129,8 @@ private:
     std::atomic<float> fadeInEnd   { -1.0f };
     std::atomic<float> fadeOutStart { -1.0f };
     std::atomic<float> fadeOutEnd   { -1.0f };
+    std::atomic<int>   fadeInCurve  { (int)FadeCurve::defaultCurve };
+    std::atomic<int>   fadeOutCurve { (int)FadeCurve::defaultCurve };
 };
 
 class AudioEngine
@@ -142,7 +146,9 @@ public:
     // Pause resumes because stopping the transport preserves its position.
     bool playSong(const juce::File& file,
                   float fadeInStart = -1.0f, float fadeInEnd = -1.0f,
-                  float fadeOutStart = -1.0f, float fadeOutEnd = -1.0f);
+                  float fadeOutStart = -1.0f, float fadeOutEnd = -1.0f,
+                  FadeCurve fadeInCurve  = FadeCurve::defaultCurve,
+                  FadeCurve fadeOutCurve = FadeCurve::defaultCurve);
     void pause();
     void resume(); // FRONTEND/BACKEND INTEGRATION: Dedicated Resume button
     void stop();
@@ -155,7 +161,8 @@ public:
     // start the next song quietly on a second deck from its fade in point
     // playSong with the same file later takes over from where this deck got to
     bool cueNext(const juce::File& file, float fadeInStart, float fadeInEnd,
-                 const SongSettings& settings);
+                 const SongSettings& settings,
+                 FadeCurve fadeInCurve = FadeCurve::defaultCurve);
 
     // FRONTEND/BACKEND INTEGRATION: Speed, volume, gain, pitch and EQ for the current song
     void applySettings(const SongSettings& settings);

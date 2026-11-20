@@ -72,7 +72,9 @@ private:
     void showMixingPage(Playlist* playlist, int songIndex);
     bool playSong(const Song& song, const SongSettings& settings,
                   float fadeInStart = -1.0f, float fadeInEnd = -1.0f,
-                  float fadeOutStart = -1.0f, float fadeOutEnd = -1.0f);
+                  float fadeOutStart = -1.0f, float fadeOutEnd = -1.0f,
+                  FadeCurve fadeInCurve  = FadeCurve::defaultCurve,
+                  FadeCurve fadeOutCurve = FadeCurve::defaultCurve);
     void updateMiniPlayer();
     void requestTranscription(const Song& song,
                               std::function<void(juce::Result, juce::String)> completion);

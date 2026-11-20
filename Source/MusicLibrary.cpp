@@ -245,6 +245,9 @@ std::map<juce::String, Transition> MusicLibrary::loadMixMarkers() const
             t.startPoint   = read ("startPoint");
             t.fadeInStart  = read ("fadeInStart");
             t.fadeInEnd    = read ("fadeInEnd");
+            // saved before fade curves existed: keep sounding linear like it used to
+            t.fadeOutCurve = fadeCurveFromInt ((int) item.getProperty ("fadeOutCurve", (int) FadeCurve::linear));
+            t.fadeInCurve  = fadeCurveFromInt ((int) item.getProperty ("fadeInCurve",  (int) FadeCurve::linear));
             mixes[key] = t;
         }
     }
@@ -265,6 +268,8 @@ bool MusicLibrary::saveMixMarkers (const std::map<juce::String, Transition>& mix
         obj->setProperty ("startPoint",   t.startPoint);
         obj->setProperty ("fadeInStart",  t.fadeInStart);
         obj->setProperty ("fadeInEnd",    t.fadeInEnd);
+        obj->setProperty ("fadeOutCurve", (int) t.fadeOutCurve);
+        obj->setProperty ("fadeInCurve",  (int) t.fadeInCurve);
         list.add (juce::var (obj));
     }
 
@@ -326,6 +331,8 @@ juce::var MusicLibrary::songToVar (const Song& s) const
         tObj->setProperty ("startPoint",   t.startPoint);
         tObj->setProperty ("fadeInStart",  t.fadeInStart);
         tObj->setProperty ("fadeInEnd",    t.fadeInEnd);
+        tObj->setProperty ("fadeOutCurve", (int) t.fadeOutCurve);
+        tObj->setProperty ("fadeInCurve",  (int) t.fadeInCurve);
         tObj->setProperty ("savedAt",      t.savedAt.toMilliseconds());
         transitions.add (juce::var (tObj));
     }
@@ -405,6 +412,9 @@ Song MusicLibrary::varToSong (const juce::var& v) const
             t.startPoint   = (float) tv["startPoint"];
             t.fadeInStart  = (float) tv["fadeInStart"];
             t.fadeInEnd    = (float) tv["fadeInEnd"];
+            // saved before fade curves existed: keep sounding linear like it used to
+            t.fadeOutCurve = fadeCurveFromInt ((int) tv.getProperty ("fadeOutCurve", (int) FadeCurve::linear));
+            t.fadeInCurve  = fadeCurveFromInt ((int) tv.getProperty ("fadeInCurve",  (int) FadeCurve::linear));
             t.savedAt      = juce::Time ((juce::int64) tv["savedAt"]);
             s.transitions.add (t);
         }

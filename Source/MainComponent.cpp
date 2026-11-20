@@ -126,17 +126,20 @@ MainComponent::MainComponent()
 
     mixingPage.onPlaySong = [this](const Song& song, const SongSettings& settings,
                                    float fadeInStart, float fadeInEnd,
-                                   float fadeOutStart, float fadeOutEnd)
+                                   float fadeOutStart, float fadeOutEnd,
+                                   FadeCurve fadeInCurve, FadeCurve fadeOutCurve)
         {
-            return playSong(song, settings, fadeInStart, fadeInEnd, fadeOutStart, fadeOutEnd);
+            return playSong(song, settings, fadeInStart, fadeInEnd, fadeOutStart, fadeOutEnd,
+                            fadeInCurve, fadeOutCurve);
         };
 
     //start the next song quietly under the fade out, sounding how its sliders were set
-    mixingPage.onCueNext = [this](const Song& song, float fadeInStart, float fadeInEnd)
+    mixingPage.onCueNext = [this](const Song& song, float fadeInStart, float fadeInEnd,
+                                  FadeCurve fadeInCurve)
         {
             return song.filePath.isNotEmpty()
                 && audioEngine.cueNext(juce::File(song.filePath), fadeInStart, fadeInEnd,
-                                       mixingPage.getSongSettings(song));
+                                       mixingPage.getSongSettings(song), fadeInCurve);
         };
 
     //pause the song without losing its current position
@@ -241,6 +244,24 @@ MainComponent::MainComponent()
     mixingPage.getLoadedFilePath   = [this] { return audioEngine.getLoadedFilePath(); };
     mixingPage.onSeek              = [this](double seconds) { audioEngine.setPosition(seconds); };
 
+    // the transitions page plays through the same engine, with the same per-song settings
+    transitionsPage.onPlaySong      = mixingPage.onPlaySong;
+    transitionsPage.onCueNext       = mixingPage.onCueNext;
+    transitionsPage.onPause         = mixingPage.onPause;
+    transitionsPage.onResume        = mixingPage.onResume;
+    transitionsPage.onStop          = mixingPage.onStop;
+    transitionsPage.onScratchStart  = mixingPage.onScratchStart;
+    transitionsPage.onScratchMove   = mixingPage.onScratchMove;
+    transitionsPage.onScratchEnd    = mixingPage.onScratchEnd;
+    transitionsPage.getSongSettings = mixingPage.getSongSettings;
+    transitionsPage.onSongSettingsChanged = mixingPage.onSongSettingsChanged;
+    transitionsPage.getPlaybackPosition   = mixingPage.getPlaybackPosition;
+    transitionsPage.getPlaybackLength     = mixingPage.getPlaybackLength;
+    transitionsPage.isPlaybackActive      = mixingPage.isPlaybackActive;
+    transitionsPage.isPlaybackPaused      = mixingPage.isPlaybackPaused;
+    transitionsPage.getLoadedFilePath     = mixingPage.getLoadedFilePath;
+    transitionsPage.onSeek                = mixingPage.onSeek;
+
     songsPage.getPlaylistsForSong = [this](const Song& s)
     {
         return playlistsPage.getPlaylistNamesContaining(s);
@@ -285,7 +306,8 @@ void MainComponent::timerCallback()
 
 bool MainComponent::playSong(const Song& song, const SongSettings& settings,
                              float fadeInStart, float fadeInEnd,
-                             float fadeOutStart, float fadeOutEnd)
+                             float fadeOutStart, float fadeOutEnd,
+                             FadeCurve fadeInCurve, FadeCurve fadeOutCurve)
 {
     //only play songs with the right files attached mp3 and wav
     if (song.filePath.isEmpty())
@@ -293,7 +315,8 @@ bool MainComponent::playSong(const Song& song, const SongSettings& settings,
 
     audioEngine.applySettings(settings);
     if (!audioEngine.playSong(juce::File(song.filePath),
-                              fadeInStart, fadeInEnd, fadeOutStart, fadeOutEnd))
+                              fadeInStart, fadeInEnd, fadeOutStart, fadeOutEnd,
+                              fadeInCurve, fadeOutCurve))
         return false;
 
     currentSong = song;
