@@ -37,7 +37,7 @@ MixingPage::MixingPage()
     playButton.getProperties().set("iconShape", "play");
     addAndMakeVisible(playButton);
 
-    // FRONTEND/BACKEND INTEGRATION: Play the selected song using JUCE
+    // FRONTEND/BACKEND INTEGRATION: one button plays, pauses and resumes
     playButton.onClick = [this]
         {
             // Make sure a valid song is selected from a playlist
@@ -45,22 +45,31 @@ MixingPage::MixingPage()
             if (song == nullptr)
                 return;
 
-            // Ask MainComponent to play the selected audio file
-            if (!playCurrentSong())
+            const bool loaded = currentSongIsLoaded();
+            if (loaded && isPlaybackActive && isPlaybackActive())
+            {
+                if (onPause) onPause();
+            }
+            else if (loaded && isPlaybackPaused && isPlaybackPaused())
+            {
+                if (onResume) onResume(); // also brings back a transition that was paused
+            }
+            else if (!playCurrentSong()) // Ask MainComponent to play the selected audio file
+            {
                 juce::AlertWindow::showMessageBoxAsync(
                     juce::MessageBoxIconType::WarningIcon,
                     "Unable to play song",
                     "This song does not have a playable MP3 or WAV file.");
+            }
+
+            updatePlayButtonIcon();
         };
 
-    // FRONTEND/BACKEND INTEGRATION: Connect Pause, Resume, and Stop
-    pauseButton.onClick = [this] { if (onPause) onPause(); };
-    resumeButton.onClick = [this] { if (onResume) onResume(); };
-    stopButton.onClick = [this] { if (onStop) onStop(); };
-
-    // Make the new buttons visible in the frontend
-    addAndMakeVisible(pauseButton);
-    addAndMakeVisible(resumeButton);
+    stopButton.onClick = [this]
+        {
+            if (onStop) onStop();
+            updatePlayButtonIcon();
+        };
     addAndMakeVisible(stopButton);
 
     recordButton.setButtonText("");
@@ -71,6 +80,16 @@ MixingPage::MixingPage()
     chart2.setIsNextSong(true);
     chart1.onJumpTo = [this](float t) { jumpTo(t); };
     chart1.onSkip   = [this] { skipToNext(); };
+    // a fade placed on one song matches the length of the other song's fade
+    chart1.getPartnerFadeSeconds = [this] { return chart2.getFadeSeconds(); };
+    chart2.getPartnerFadeSeconds = [this] { return chart1.getFadeSeconds(); };
+    // changing either fade changes the other, so the fade out and fade in always match
+    chart1.onFadeChanged = [this] { chart2.setFadeSeconds(chart1.getFadeSeconds()); };
+    chart2.onFadeChanged = [this] { chart1.setFadeSeconds(chart2.getFadeSeconds()); };
+    chart1.onPrevious    = [this] { skipToPrevious(); };
+    // markers are remembered per pair of songs, so switching away and back keeps them
+    chart1.onMarkersChanged = [this] { saveMixMarkers(); };
+    chart2.onMarkersChanged = [this] { saveMixMarkers(); };
     addAndMakeVisible(chart1);
     addAndMakeVisible(chart2);
     transitionPresetsButton.onClick = [this] { showTransitionPresets(); };
@@ -82,6 +101,20 @@ MixingPage::MixingPage()
         l->setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.4f));
         addAndMakeVisible(l);
     }
+
+    // pick which song the sliders change
+    controllingLabel.setFont(juce::FontOptions(12.0f));
+    addAndMakeVisible(controllingLabel);
+    for (auto* b : { &deck1Button, &deck2Button })
+    {
+        b->setClickingTogglesState(true);
+        b->setRadioGroupId(1);
+        addAndMakeVisible(b);
+    }
+    deck1Button.onClick = [this] { if (deck1Button.getToggleState()) setControlledDeck(0); };
+    deck2Button.onClick = [this] { if (deck2Button.getToggleState()) setControlledDeck(1); };
+    deck1Button.setTooltip("The sliders change the song that is playing now");
+    deck2Button.setTooltip("The sliders change the next song, heard while it fades in");
 
     for (auto* l : { &volumeLabel, &gainLabel, &pitchLabel, &speedLabel,
                      &trebleLabel, &midsLabel, &bassLabel })
@@ -96,7 +129,8 @@ MixingPage::MixingPage()
 
     setupSlider(volumeSlider,    0.0, 100.0, defaults.volume * 100.0, "%", 0);
     setupSlider(gainSlider, -maxGain, maxGain, defaults.gainDb, " dB", 1);
-    setupSlider(pitchSlider,   -12.0,  12.0,   0.0, " st", 1);
+    setupSlider(pitchSlider, -SongSettings::maxPitch, SongSettings::maxPitch,
+                defaults.pitch, " st", 1);
     setupSlider(speedSlider, SongSettings::minSpeed * 100.0, SongSettings::maxSpeed * 100.0,
                 defaults.speed * 100.0, "%", 0);
     setupSlider(trebleSlider, -maxEq, maxEq, defaults.trebleDb, " dB", 1);
@@ -104,41 +138,44 @@ MixingPage::MixingPage()
     setupSlider(bassSlider,   -maxEq, maxEq, defaults.bassDb,   " dB", 1);
 
     // FRONTEND/BACKEND INTEGRATION: Moving a slider updates the current song only
-    songSliders = { &volumeSlider, &gainSlider, &speedSlider,
+    songSliders = { &volumeSlider, &gainSlider, &pitchSlider, &speedSlider,
                     &trebleSlider, &midsSlider, &bassSlider };
 
     for (auto* s : songSliders)
         s->onValueChange = [this]
         {
-            const auto* song = getCurrentSong();
+            const auto* song = getControlledSong();
             if (song != nullptr && onSongSettingsChanged)
-                onSongSettingsChanged(*song, getSliderSettings());
+                onSongSettingsChanged(*song, getSliderSettings(), controlledDeck == 1);
         };
 
-    //scratch slider
+    //scratch slider: grab the record, the song follows the hand, let go and it carries on
     scratchSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    scratchSlider.setRange(-2.0, 2.0, 0.05);
+    scratchSlider.setRange(-2.0, 2.0, 0.001); // fine steps so the movement is smooth
     scratchSlider.setValue(0.0, juce::dontSendNotification);
-    scratchSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 80, 24);
+    scratchSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, true, 80, 24);
+    scratchSlider.setNumDecimalPlacesToDisplay(2);
     scratchSlider.setTextValueSuffix(" sec");
-    scratchSlider.setTooltip("Scratch: drag left or right");
+    scratchSlider.setTooltip("Scratch the playing song: drag left or right");
     addAndMakeVisible(scratchSlider);
+
+    scratchSlider.onDragStart = [this]
+        {
+            scratching = true;
+            if (onScratchStart) onScratchStart();
+        };
 
     scratchSlider.onValueChange = [this]
         {
-            double newValue = scratchSlider.getValue();
-            double difference = newValue - previousScratchValue;
-
-            if (onScratch)
-                onScratch(difference);
-
-            previousScratchValue = newValue;
+            if (scratching && onScratchMove)
+                onScratchMove(scratchSlider.getValue());
         };
 
     scratchSlider.onDragEnd = [this]
         {
+            scratching = false;
+            if (onScratchEnd) onScratchEnd();
             scratchSlider.setValue(0.0, juce::dontSendNotification);
-            previousScratchValue = 0.0;
         };
 }
 
@@ -170,6 +207,7 @@ void MixingPage::setContent(Playlist* playlist, int songIndex)
     if (onStop) onStop();
     currentPlaylist = playlist;
     currentIndex    = songIndex;
+    controlledDeck  = 0; // after a handover the song that was next is now song 1
     loadSongSettings();
     incomingFadeInStart = -1.0f;
     incomingFadeInEnd   = -1.0f;
@@ -190,13 +228,28 @@ void MixingPage::setContent(Playlist* playlist, int songIndex)
             incomingFadeInStart = nextFadeInStart;
             incomingFadeInEnd = nextFadeInEnd;
         }
-        else if (hasCurr && songIndex > 0 && getTransitionsForPair)
+        else if (hasCurr && songIndex > 0)
         {
-            const auto incomingTransitions = getTransitionsForPair(
-                songs[songIndex - 1].title, songs[songIndex].title);
-            if (!incomingTransitions.isEmpty())
+            // the fade in the user placed for the previous song into this one, else the first preset
+            Transition t;
+            bool found = false;
+            if (getMixMarkers)
             {
-                const auto& t = incomingTransitions.getReference(0);
+                t = getMixMarkers(songs[songIndex - 1], songs[songIndex]);
+                found = t.fadeInStart >= 0.0f;
+            }
+            if (!found && getTransitionsForPair)
+            {
+                const auto presets = getTransitionsForPair(songs[songIndex - 1].title, songs[songIndex].title);
+                if (!presets.isEmpty())
+                {
+                    t = presets.getReference(0);
+                    found = true;
+                }
+            }
+
+            if (found)
+            {
                 incomingFadeInStart = t.fadeInStart;
                 incomingFadeInEnd = fadeInEndOrMatch(t.fadeInStart, t.fadeInEnd,
                                                      t.fadeOutStart, t.fadeOutEnd,
@@ -209,6 +262,14 @@ void MixingPage::setContent(Playlist* playlist, int songIndex)
         chart2.setSongName    (hasNext ? songs[songIndex + 1].title         : juce::String{});
         chart1.setSongDuration(hasCurr ? songs[songIndex].durationSeconds   : 0);
         chart2.setSongDuration(hasNext ? songs[songIndex + 1].durationSeconds : 0);
+        chart1.setSongFile    (hasCurr ? songs[songIndex].filePath          : juce::String{});
+        chart2.setSongFile    (hasNext ? songs[songIndex + 1].filePath      : juce::String{});
+
+        // bring back the markers last placed for this pair, or clear the old pair's
+        const Transition saved = hasCurr && hasNext && getMixMarkers
+                               ? getMixMarkers(songs[songIndex], songs[songIndex + 1]) : Transition{};
+        chart1.applyTransition(saved);
+        chart2.applyTransition(saved);
 
         juce::Array<Song> arr;
         for (const auto& s : songs) arr.add(s);
@@ -221,6 +282,8 @@ void MixingPage::setContent(Playlist* playlist, int songIndex)
         };
     }
 
+    updateDeckButtons();
+    updatePlayButtonIcon();
     resetPlayhead();
 }
 
@@ -261,6 +324,18 @@ void MixingPage::jumpTo(float position)
         onSeek(position * getPlaybackLength());
 }
 
+void MixingPage::skipToPrevious()
+{
+    if (currentPlaylist == nullptr || currentIndex <= 0) return;
+
+    // keep playing if it was already playing, same as skip
+    const bool wasPlaying = currentSongIsLoaded() && isPlaybackActive && isPlaybackActive();
+    setContent(currentPlaylist, currentIndex - 1); // this stops the current song
+
+    if (wasPlaying)
+        playCurrentSong();
+}
+
 void MixingPage::skipToNext()
 {
     if (currentPlaylist == nullptr || currentIndex + 1 >= currentPlaylist->songs.size()) return;
@@ -284,8 +359,23 @@ bool MixingPage::playCurrentSong()
                       chart1.getFadeStart(), chart1.getFadeEnd());
 }
 
+void MixingPage::updatePlayButtonIcon()
+{
+    const bool playing = currentSongIsLoaded() && isPlaybackActive && isPlaybackActive();
+    const juce::String shape = playing ? "pause" : "play";
+    if (playButton.getProperties()["iconShape"].toString() != shape)
+    {
+        playButton.getProperties().set("iconShape", shape);
+        playButton.setTooltip(playing ? "Pause" : "Play");
+        playButton.repaint();
+    }
+}
+
 void MixingPage::timerCallback()
 {
+    if (! scratching)
+        updatePlayButtonIcon(); // the record is held still while scratching, keep showing pause
+
     if (! currentSongIsLoaded() || ! getPlaybackPosition || ! getPlaybackLength) return;
 
     const double length = getPlaybackLength();
@@ -317,19 +407,10 @@ void MixingPage::timerCallback()
         if (hasNext)
         {
             // picks up chart2's fade in, and the engine takes over the incoming deck
+            // setContent loads this song's own saved settings, the same ones the incoming
+            // deck was already playing with, so nothing jumps at the handover
             setContent(currentPlaylist, currentIndex + 1);
-
-            // swapped in songs start with the dials neutral, saved settings are left alone
-            const SongSettings neutral;
-            volumeSlider.setValue(neutral.volume * 100.0, juce::dontSendNotification);
-            gainSlider  .setValue(neutral.gainDb,         juce::dontSendNotification);
-            speedSlider .setValue(neutral.speed * 100.0,  juce::dontSendNotification);
-            trebleSlider.setValue(neutral.trebleDb,       juce::dontSendNotification);
-            midsSlider  .setValue(neutral.midsDb,         juce::dontSendNotification);
-            bassSlider  .setValue(neutral.bassDb,         juce::dontSendNotification);
-            pitchSlider .setValue(0.0,                    juce::dontSendNotification);
-
-            playCurrentSong(); // applies the neutral dials to the audio
+            playCurrentSong();
         }
         else if (onStop)
         {
@@ -354,6 +435,41 @@ const Song* MixingPage::getCurrentSong() const
     return &currentPlaylist->songs.getReference(currentIndex);
 }
 
+const Song* MixingPage::getNextSong() const
+{
+    if (currentPlaylist == nullptr ||
+        !juce::isPositiveAndBelow(currentIndex + 1, currentPlaylist->songs.size()))
+        return nullptr;
+
+    return &currentPlaylist->songs.getReference(currentIndex + 1);
+}
+
+const Song* MixingPage::getControlledSong() const
+{
+    return controlledDeck == 1 ? getNextSong() : getCurrentSong();
+}
+
+void MixingPage::setControlledDeck(int deck)
+{
+    controlledDeck = (deck == 1 && getNextSong() != nullptr) ? 1 : 0;
+    loadSongSettings();
+    updateDeckButtons();
+}
+
+void MixingPage::updateDeckButtons()
+{
+    if (controlledDeck == 1 && getNextSong() == nullptr)
+        controlledDeck = 0;
+
+    const auto* current = getCurrentSong();
+    const auto* next    = getNextSong();
+    deck1Button.setButtonText("1: " + (current != nullptr ? current->title : juce::String("(none)")));
+    deck2Button.setButtonText("2: " + (next    != nullptr ? next->title    : juce::String("(no next song)")));
+    deck2Button.setEnabled(next != nullptr);
+    deck1Button.setToggleState(controlledDeck == 0, juce::dontSendNotification);
+    deck2Button.setToggleState(controlledDeck == 1, juce::dontSendNotification);
+}
+
 SongSettings MixingPage::getSliderSettings() const
 {
     SongSettings settings;
@@ -363,12 +479,13 @@ SongSettings MixingPage::getSliderSettings() const
     settings.bassDb   = bassSlider.getValue();
     settings.midsDb   = midsSlider.getValue();
     settings.trebleDb = trebleSlider.getValue();
+    settings.pitch    = pitchSlider.getValue();
     return settings;
 }
 
 void MixingPage::loadSongSettings()
 {
-    const auto* song    = getCurrentSong();
+    const auto* song    = getControlledSong();
     const bool hasAudio = song != nullptr && song->filePath.isNotEmpty();
     const auto settings = hasAudio && getSongSettings ? getSongSettings(*song) : SongSettings{};
 
@@ -378,15 +495,19 @@ void MixingPage::loadSongSettings()
     trebleSlider.setValue(settings.trebleDb,       juce::dontSendNotification);
     midsSlider  .setValue(settings.midsDb,         juce::dontSendNotification);
     bassSlider  .setValue(settings.bassDb,         juce::dontSendNotification);
+    pitchSlider .setValue(settings.pitch,          juce::dontSendNotification);
 
     // A song with no audio file has nothing to control.
     for (auto* s : songSliders)
         s->setEnabled(hasAudio);
 
-    pitchSlider.setEnabled(hasAudio);
-
-    controlsHeader.setText(hasAudio ? "CONTROLS" : "CONTROLS (no audio file for this song)",
+    // name the song so it's clear which one the sliders change
+    const juce::String name = song != nullptr ? song->title.toUpperCase() : juce::String();
+    controlsHeader.setText(song == nullptr ? "CONTROLS"
+                           : hasAudio      ? "CONTROLS - " + name
+                                           : "CONTROLS - " + name + " (no audio file)",
                            juce::dontSendNotification);
+    eqHeader.setText(song != nullptr ? "EQ - " + name : "EQ", juce::dontSendNotification);
 }
 
 void MixingPage::visibilityChanged()
@@ -427,6 +548,7 @@ void MixingPage::showTransitionPresets()
             const auto& t = presets[result - 1];
             chart1.applyTransition(t);
             chart2.applyTransition(t);
+            saveMixMarkers(); // switching away and back keeps the preset's markers too
             // Read-only after applying — no editing or saving in MixingPage
             chart1.setEditable(false);
             chart2.setEditable(false);
@@ -434,6 +556,23 @@ void MixingPage::showTransitionPresets()
 }
 
 // ── Paint ─────────────────────────────────────────────────────────────────────
+
+void MixingPage::saveMixMarkers()
+{
+    const auto* current = getCurrentSong();
+    const auto* next    = getNextSong();
+    if (current == nullptr || next == nullptr || ! onMixMarkersChanged)
+        return;
+
+    Transition t;
+    t.loopPoint    = chart1.getLoopPoint();
+    t.fadeOutStart = chart1.getFadeStart();
+    t.fadeOutEnd   = chart1.getFadeEnd();
+    t.startPoint   = chart2.getStartPoint();
+    t.fadeInStart  = chart2.getFadeStart();
+    t.fadeInEnd    = chart2.getFadeEnd();
+    onMixMarkersChanged(*current, *next, t);
+}
 
 void MixingPage::paint(juce::Graphics& g)
 {
@@ -461,13 +600,6 @@ void MixingPage::resized()
         auto row = area.removeFromTop(30);
         playButton.setBounds      (row.removeFromLeft(32).withSizeKeepingCentre(32, 30));
         row.removeFromLeft(6);
-        //position for new playback buttons
-        pauseButton.setBounds(row.removeFromLeft(58));
-        row.removeFromLeft(6);
-
-        resumeButton.setBounds(row.removeFromLeft(66));
-        row.removeFromLeft(6);
-
         stopButton.setBounds(row.removeFromLeft(50));
         row.removeFromLeft(6);
         recordButton.setBounds    (row.removeFromLeft(32).withSizeKeepingCentre(32, 30));
@@ -476,7 +608,7 @@ void MixingPage::resized()
     area.removeFromTop(8);
 
     // The charts give up height first so every slider row stays on screen
-    const int controlsH = 18 + 8 + 4 * kSliderH + 3 * kSliderGap;
+    const int controlsH = 24 + 8 + 18 + 8 + 4 * kSliderH + 3 * kSliderGap;
     const int gapsH     = 6 + 26 + 6 + kSepGap + 1 + kSepGap;
     const int chartH    = juce::jmin(kChartH, (area.getHeight() - controlsH - gapsH) / 2);
 
@@ -504,6 +636,17 @@ void MixingPage::resized()
     area.removeFromTop(kSepGap);
     sepY = area.getY();
     area.removeFromTop(1 + kSepGap);
+
+    // Which song the sliders change
+    {
+        auto row = area.removeFromTop(24);
+        controllingLabel.setBounds(row.removeFromLeft(kLabelW + 14));
+        const int deckW = juce::jmin(240, (row.getWidth() - 8) / 2);
+        deck1Button.setBounds(row.removeFromLeft(deckW));
+        row.removeFromLeft(8);
+        deck2Button.setBounds(row.removeFromLeft(deckW));
+    }
+    area.removeFromTop(8);
 
     // Two-column slider section
     const int colW = (area.getWidth() - kColGap) / 2;

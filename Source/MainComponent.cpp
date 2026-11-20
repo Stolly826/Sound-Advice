@@ -53,11 +53,12 @@ MainComponent::MainComponent()
                                         fadeInStart, fadeInEnd, fadeOutStart, fadeOutEnd);
         };
 
-    //start the next song quietly under the fade out
+    //start the next song quietly under the fade out, sounding how its sliders were set
     mixingPage.onCueNext = [this](const Song& song, float fadeInStart, float fadeInEnd)
         {
             return song.filePath.isNotEmpty()
-                && audioEngine.cueNext(juce::File(song.filePath), fadeInStart, fadeInEnd);
+                && audioEngine.cueNext(juce::File(song.filePath), fadeInStart, fadeInEnd,
+                                       mixingPage.getSongSettings(song));
         };
 
     //pause the song without losing its current position
@@ -79,9 +80,14 @@ MainComponent::MainComponent()
         };
 
     //changes are heard straight away, the file gets written once the sliders settle
-    mixingPage.onSongSettingsChanged = [this](const Song& song, const SongSettings& settings)
+    //the next song's sliders go to the incoming deck so they're heard while it fades in
+    mixingPage.onSongSettingsChanged = [this](const Song& song, const SongSettings& settings,
+                                              bool isNextSong)
         {
-            audioEngine.applySettings(settings);
+            if (isNextSong)
+                audioEngine.applyIncomingSettings(settings);
+            else
+                audioEngine.applySettings(settings);
 
             const auto key = songsPage.getLibrary().getSettingsKey(song);
             if (key.isNotEmpty())
@@ -91,11 +97,42 @@ MainComponent::MainComponent()
             }
         };
 
-    //a removed songs file can be reused by the next upload so its settings go with it
+    //fades, loop and start markers come back when you return to a pair of songs, even after a restart
+    mixMarkers = songsPage.getLibrary().loadMixMarkers();
+
+    mixingPage.getMixMarkers = [this](const Song& from, const Song& to)
+        {
+            const auto found = mixMarkers.find(songsPage.getLibrary().getMixKey(from, to));
+            return found != mixMarkers.end() ? found->second : Transition{};
+        };
+
+    mixingPage.onMixMarkersChanged = [this](const Song& from, const Song& to, const Transition& t)
+        {
+            mixMarkers[songsPage.getLibrary().getMixKey(from, to)] = t;
+            if (! songsPage.getLibrary().saveMixMarkers(mixMarkers))
+            {
+                DBG("couldnt save mix markers to " + songsPage.getLibrary().getMixesFile().getFullPathName());
+            }
+        };
+
+    //a removed songs file can be reused by the next upload so its settings and mixes go with it
     songsPage.onSongRemoved = [this](const Song& song)
         {
-            if (songSettings.erase(songsPage.getLibrary().getSettingsKey(song)) > 0)
+            const auto key = songsPage.getLibrary().getSettingsKey(song);
+            if (songSettings.erase(key) > 0)
                 songsPage.getLibrary().saveSongSettings(songSettings);
+
+            const auto before = mixMarkers.size();
+            const auto ownKey = key.isNotEmpty() ? key : "title:" + song.title;
+            for (auto it = mixMarkers.begin(); it != mixMarkers.end();)
+            {
+                if (it->first.startsWith(ownKey + " -> ") || it->first.endsWith(" -> " + ownKey))
+                    it = mixMarkers.erase(it);
+                else
+                    ++it;
+            }
+            if (mixMarkers.size() != before)
+                songsPage.getLibrary().saveMixMarkers(mixMarkers);
         };
 
     // FRONTEND/BACKEND INTEGRATION: fill in the add song dialog from the files own tags
@@ -113,15 +150,16 @@ MainComponent::MainComponent()
     songsPage.readSongDetails          = readSongDetails;
     playlistDetailPage.readSongDetails = readSongDetails;
 
-    mixingPage.onScratch = [this](double offsetSeconds)
-        {
-            audioEngine.scratch(offsetSeconds);
-        };
+    //scratching: grab the record, move it, let go
+    mixingPage.onScratchStart = [this] { audioEngine.beginScratch(); };
+    mixingPage.onScratchMove  = [this](double offsetSeconds) { audioEngine.scratchTo(offsetSeconds); };
+    mixingPage.onScratchEnd   = [this] { audioEngine.endScratch(); };
 
     // playhead jump to and skip read from the same engine
     mixingPage.getPlaybackPosition = [this] { return audioEngine.getPosition(); };
     mixingPage.getPlaybackLength   = [this] { return audioEngine.getLength(); };
     mixingPage.isPlaybackActive    = [this] { return audioEngine.isPlaying(); };
+    mixingPage.isPlaybackPaused    = [this] { return audioEngine.isPaused(); };
     mixingPage.getLoadedFilePath   = [this] { return audioEngine.getLoadedFilePath(); };
     mixingPage.onSeek              = [this](double seconds) { audioEngine.setPosition(seconds); };
 

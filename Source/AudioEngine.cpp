@@ -17,6 +17,11 @@ void SongEffectsSource::setSpeed(double newSpeed)
     resampler.setResamplingRatio(newSpeed);
 }
 
+void SongEffectsSource::setPitch(double semitones)
+{
+    pitchSemitones = semitones;
+}
+
 void SongEffectsSource::setEq(double newBassDb, double newMidsDb, double newTrebleDb)
 {
     bassDb = newBassDb;
@@ -37,6 +42,7 @@ void SongEffectsSource::prepareToPlay(int samplesPerBlockExpected, double sample
     resampler.prepareToPlay(juce::roundToInt(samplesPerBlockExpected * SongSettings::maxSpeed),
                             sampleRate);
     resampler.setResamplingRatio(speed);
+    pitchShifter.prepare(sampleRate);
 
     for (auto& channel : filters)
         for (auto& filter : channel)
@@ -53,6 +59,25 @@ void SongEffectsSource::releaseResources()
 void SongEffectsSource::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
 {
     resampler.getNextAudioBlock(info);
+
+    // pitch shifting colours the sound a little, so it is skipped entirely at 0
+    const double semitones = pitchSemitones.load();
+    if (std::abs(semitones) > 0.01)
+    {
+        float* channels[kNumChannels] = {};
+        const int numShifted = juce::jmin(kNumChannels, info.buffer->getNumChannels());
+        for (int ch = 0; ch < numShifted; ++ch)
+            channels[ch] = info.buffer->getWritePointer(ch, info.startSample);
+
+        pitchShifter.process(channels, numShifted, info.numSamples,
+                             std::pow(2.0, semitones / 12.0));
+        pitchWasOn = true;
+    }
+    else if (pitchWasOn)
+    {
+        pitchShifter.reset(); // so old audio isnt heard the next time it is turned on
+        pitchWasOn = false;
+    }
 
     if (eqChanged.exchange(false))
         updateFilters();
@@ -86,6 +111,193 @@ void SongEffectsSource::updateFilters()
         channel[treble].setCoefficients(trebleBand);
     }
 }
+
+// ── Pitch shifter ─────────────────────────────────────────────────────────────
+
+void PitchShifter::prepare(double sampleRate)
+{
+    windowSize = kWindowSeconds * sampleRate;
+    bufferSize = (int)windowSize + 8;
+    for (auto& line : delayLine)
+        line.assign((size_t)bufferSize, 0.0f);
+    reset();
+}
+
+void PitchShifter::reset()
+{
+    for (auto& line : delayLine)
+        std::fill(line.begin(), line.end(), 0.0f);
+    writePos = 0;
+    phase = 0.0;
+}
+
+float PitchShifter::readDelayed(int channel, double delaySamples) const
+{
+    double pos = writePos - delaySamples;
+    if (pos < 0.0)
+        pos += bufferSize;
+
+    const int i0 = (int)pos;
+    const int i1 = i0 + 1 < bufferSize ? i0 + 1 : 0;
+    const float frac = (float)(pos - i0);
+    const auto& line = delayLine[channel];
+    return line[(size_t)i0] + (line[(size_t)i1] - line[(size_t)i0]) * frac;
+}
+
+void PitchShifter::process(float* const* channels, int numChannels, int numSamples, double ratio)
+{
+    if (bufferSize == 0)
+        return;
+
+    numChannels = juce::jmin(numChannels, kChannels);
+
+    // the delay grows or shrinks by (1 - ratio) every sample, which is what changes the pitch
+    const double step = (1.0 - ratio) / windowSize;
+
+    for (int s = 0; s < numSamples; ++s)
+    {
+        for (int ch = 0; ch < numChannels; ++ch)
+            delayLine[ch][(size_t)writePos] = channels[ch][s];
+
+        // the second head is half a window behind, and their fades always add up to 1
+        double otherPhase = phase + 0.5;
+        if (otherPhase >= 1.0)
+            otherPhase -= 1.0;
+
+        const float fade = (float)std::sin(juce::MathConstants<double>::pi * phase);
+        const float gain1 = fade * fade;
+        const float gain2 = 1.0f - gain1;
+        const double delay1 = 1.0 + phase * windowSize;
+        const double delay2 = 1.0 + otherPhase * windowSize;
+
+        for (int ch = 0; ch < numChannels; ++ch)
+            channels[ch][s] = gain1 * readDelayed(ch, delay1) + gain2 * readDelayed(ch, delay2);
+
+        phase += step;
+        if (phase >= 1.0)     phase -= 1.0;
+        else if (phase < 0.0) phase += 1.0;
+
+        if (++writePos >= bufferSize)
+            writePos = 0;
+    }
+}
+
+// ── Scratching ────────────────────────────────────────────────────────────────
+
+// how quickly the record catches up with the hand, and how much the speed is smoothed
+static constexpr double kScratchFollowSeconds = 0.025;
+static constexpr double kScratchSmoothSeconds = 0.004;
+static constexpr double kScratchMaxSpeed      = 4.0; // times normal speed
+
+bool ScratchAudioSource::begin(juce::AudioFormatReader& reader, double grabSeconds, double rangeSeconds)
+{
+    const double rate = reader.sampleRate;
+    const juce::int64 total = reader.lengthInSamples;
+    if (rate <= 0.0 || total <= 0)
+        return false;
+
+    const auto range = (juce::int64)(rangeSeconds * rate);
+    const juce::int64 centre = std::clamp((juce::int64)(grabSeconds * rate), (juce::int64)0, total);
+    const juce::int64 start = std::max((juce::int64)0, centre - range);
+    const juce::int64 finish = std::min(total, centre + range);
+    const int length = (int)(finish - start);
+    if (length < 8)
+        return false;
+
+    juce::AudioBuffer<float> newWindow((int)juce::jmax(1u, juce::jmin(2u, reader.numChannels)), length);
+    reader.read(&newWindow, 0, length, start, true, true);
+
+    const juce::SpinLock::ScopedLockType sl(lock);
+    window = std::move(newWindow);
+    windowStartSeconds = (double)start / rate;
+    fileRate = rate;
+    grabPos = (double)(centre - start);
+    readPos = grabPos;
+    velocity = 0.0;
+    handPos = grabPos;
+    positionSeconds = grabSeconds;
+    active = true;
+    return true;
+}
+
+void ScratchAudioSource::setHandOffset(double seconds)
+{
+    handPos = grabPos + seconds * fileRate;
+}
+
+double ScratchAudioSource::end()
+{
+    const juce::SpinLock::ScopedLockType sl(lock);
+    active = false;
+    return windowStartSeconds + readPos / fileRate;
+}
+
+void ScratchAudioSource::prepareToPlay(int samplesPerBlockExpected, double sampleRate)
+{
+    deviceRate = sampleRate;
+    input.prepareToPlay(samplesPerBlockExpected, sampleRate);
+}
+
+void ScratchAudioSource::releaseResources()
+{
+    input.releaseResources();
+}
+
+float ScratchAudioSource::sampleAt(int channel, double pos) const
+{
+    // 4 point Hermite interpolation keeps slow scratches from sounding gritty
+    const int i = (int)pos;
+    const float f = (float)(pos - i);
+    const float* d = window.getReadPointer(channel);
+    const float xm1 = d[i - 1], x0 = d[i], x1 = d[i + 1], x2 = d[i + 2];
+    const float c1 = 0.5f * (x1 - xm1);
+    const float c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2;
+    const float c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
+    return ((c3 * f + c2) * f + c1) * f + x0;
+}
+
+void ScratchAudioSource::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
+{
+    if (!active.load())
+    {
+        input.getNextAudioBlock(info);
+        return;
+    }
+
+    const juce::SpinLock::ScopedTryLockType tryLock(lock);
+    if (!tryLock.isLocked() || !active.load() || window.getNumSamples() < 8)
+    {
+        info.clearActiveBufferRegion();
+        return;
+    }
+
+    const double normalStep = fileRate / deviceRate; // window samples per output sample at 1x
+    const double maxStep = normalStep * kScratchMaxSpeed;
+    const double follow = 1.0 / (kScratchFollowSeconds * deviceRate);
+    const double smoothing = 1.0 - std::exp(-1.0 / (kScratchSmoothSeconds * deviceRate));
+    const double target = handPos.load();
+    const double lastPos = window.getNumSamples() - 3.0;
+    const int sourceChannels = window.getNumChannels();
+
+    for (int s = 0; s < info.numSamples; ++s)
+    {
+        // the record chases the hand, so a quick flick speeds up and slows down like vinyl
+        const double wanted = juce::jlimit(-maxStep, maxStep, (target - readPos) * follow);
+        velocity += (wanted - velocity) * smoothing;
+        readPos = juce::jlimit(1.0, lastPos, readPos + velocity);
+
+        // a record held still is silent and gets louder as it picks up speed
+        const float gain = (float)juce::jmin(1.0, std::abs(velocity) / (normalStep * 0.3));
+
+        for (int ch = 0; ch < info.buffer->getNumChannels(); ++ch)
+            info.buffer->getWritePointer(ch, info.startSample)[s]
+                = sampleAt(juce::jmin(ch, sourceChannels - 1), readPos) * gain;
+    }
+
+    positionSeconds = windowStartSeconds + readPos / fileRate;
+}
+
+// ── Engine ────────────────────────────────────────────────────────────────────
 
 AudioEngine::AudioEngine()
 {
@@ -127,6 +339,9 @@ bool AudioEngine::playSong(const juce::File& file,
     if (!isReady() || !file.existsAsFile())
         return false;
 
+    if (scratchSource.isActive())
+        endScratch();
+
     fadeSource.setFadePoints(fadeInStart, fadeInEnd, fadeOutStart, fadeOutEnd);
 
     if (incomingReader && incomingFilePath == file.getFullPathName())
@@ -144,6 +359,7 @@ bool AudioEngine::playSong(const juce::File& file,
         transport.setPosition(position);
         loadedFilePath = incomingFilePath;
         incomingFilePath.clear();
+        openScratchReader(file);
         paused = false;
     }
     else if (loadedFilePath != file.getFullPathName())
@@ -162,6 +378,7 @@ bool AudioEngine::playSong(const juce::File& file,
             reader.release(), true);
         transport.setSource(readerSource.get(), 0, nullptr, sampleRate);
         loadedFilePath = file.getFullPathName();
+        openScratchReader(file);
         paused = false; // New song should never inherit paused state.
     }
 
@@ -180,7 +397,8 @@ bool AudioEngine::playSong(const juce::File& file,
     return true;
 }
 
-bool AudioEngine::cueNext(const juce::File& file, float fadeInStart, float fadeInEnd)
+bool AudioEngine::cueNext(const juce::File& file, float fadeInStart, float fadeInEnd,
+                          const SongSettings& settings)
 {
     if (!isReady() || !file.existsAsFile())
         return false;
@@ -194,6 +412,7 @@ bool AudioEngine::cueNext(const juce::File& file, float fadeInStart, float fadeI
         return false;
 
     const double sampleRate = reader->sampleRate;
+    applyIncomingSettings(settings); // the next song comes in sounding how the user set it
     incomingTransport.stop();
     incomingTransport.setSource(nullptr);
     incomingReader = std::make_unique<juce::AudioFormatReaderSource>(reader.release(), true);
@@ -292,44 +511,83 @@ void AudioEngine::resume()
 
 void AudioEngine::stop()
 {
+    if (scratchSource.isActive())
+        scratchSource.end();
+    playingBeforeScratch = false;
+
     transport.stop();
     transport.setPosition(0.0); // Stop always starts over next time.
     incomingTransport.stop();   // kept loaded so moving to the next song can take it over
     paused = false;
 }
 
-void AudioEngine::applySettings(const SongSettings& settings)
+void AudioEngine::applyTo(juce::AudioTransportSource& deck, SongEffectsSource& fx,
+                          const SongSettings& settings)
 {
     // Volume and gain are both level changes, so the transport's smoothed gain does both.
-    transport.setGain((float)(settings.volume * juce::Decibels::decibelsToGain(settings.gainDb)));
-    effects.setSpeed(settings.speed);
-    effects.setEq(settings.bassDb, settings.midsDb, settings.trebleDb);
+    deck.setGain((float)(settings.volume * juce::Decibels::decibelsToGain(settings.gainDb)));
+    fx.setSpeed(settings.speed);
+    fx.setPitch(settings.pitch);
+    fx.setEq(settings.bassDb, settings.midsDb, settings.trebleDb);
 }
 
-//scratch stuff
-void AudioEngine::scratch(double offsetSeconds)
+void AudioEngine::applySettings(const SongSettings& settings)
 {
-    //make sure song is loaded
-    if (!readerSource)
-        return;
-
-    double songLength = transport.getLengthInSeconds();
-    if (songLength <= 0.0)
-        return;
-
-    //showing where to move
-    double newPosition = transport.getCurrentPosition() + offsetSeconds;
-
-    //stays within bounds of the song
-    newPosition = juce::jlimit(0.0, songLength, newPosition);
-
-    //move playback
-    transport.setPosition(newPosition);
+    applyTo(transport, effects, settings);
 }
+
+void AudioEngine::applyIncomingSettings(const SongSettings& settings)
+{
+    applyTo(incomingTransport, incomingEffects, settings);
+}
+
+// scratching: the transport is held still while the scratch source plays the record
+void AudioEngine::openScratchReader(const juce::File& file)
+{
+    scratchReader = std::unique_ptr<juce::AudioFormatReader>(formatManager.createReaderFor(file));
+}
+
+void AudioEngine::beginScratch()
+{
+    if (!readerSource || !scratchReader || scratchSource.isActive())
+        return;
+
+    playingBeforeScratch = transport.isPlaying();
+    const double grabbedAt = transport.getCurrentPosition();
+    transport.stop();
+
+    if (!scratchSource.begin(*scratchReader, grabbedAt, kScratchRangeSeconds) && playingBeforeScratch)
+        transport.start(); // couldnt read the audio, just carry on
+}
+
+void AudioEngine::scratchTo(double offsetSeconds)
+{
+    if (scratchSource.isActive())
+        scratchSource.setHandOffset(offsetSeconds);
+}
+
+void AudioEngine::endScratch()
+{
+    if (!scratchSource.isActive())
+        return;
+
+    // carry on from wherever the record was let go
+    transport.setPosition(scratchSource.end());
+    if (playingBeforeScratch)
+        transport.start();
+    playingBeforeScratch = false;
+}
+
+double AudioEngine::getPosition() const
+{
+    return scratchSource.isActive() ? scratchSource.getPositionSeconds()
+                                    : transport.getCurrentPosition();
+}
+
 // jump to a time used by jump to and loop return
 void AudioEngine::setPosition(double seconds)
 {
-    if (!readerSource)
+    if (!readerSource || scratchSource.isActive())
         return;
 
     transport.setPosition(juce::jlimit(0.0, transport.getLengthInSeconds(), seconds));

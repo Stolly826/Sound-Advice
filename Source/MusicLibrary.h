@@ -56,6 +56,14 @@ public:
     std::map<juce::String, SongSettings> loadSongSettings() const;
     bool saveSongSettings (const std::map<juce::String, SongSettings>& settings) const;
 
+    // the markers last placed on the mixing page for each pair of songs (fades, loop, start)
+    // kept in mixes.json, separate from the named transition presets
+    // keyed by getMixKey so it follows the files like settings.json does
+    juce::File   getMixesFile() const;
+    juce::String getMixKey (const Song& from, const Song& to) const;
+    std::map<juce::String, Transition> loadMixMarkers() const;
+    bool saveMixMarkers (const std::map<juce::String, Transition>& mixes) const;
+
 private:
     juce::File libraryFolder;
     juce::AudioFormatManager formatManager;

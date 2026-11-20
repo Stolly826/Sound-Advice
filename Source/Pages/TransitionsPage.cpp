@@ -28,6 +28,12 @@ TransitionsPage::TransitionsPage()
     chart2.setIsNextSong(true);
     chart1.onSelectSong = [this] { showPickSong(chart1); };
     chart2.onSelectSong = [this] { showPickSong(chart2); };
+    // a fade placed on one song matches the length of the other song's fade
+    chart1.getPartnerFadeSeconds = [this] { return chart2.getFadeSeconds(); };
+    chart2.getPartnerFadeSeconds = [this] { return chart1.getFadeSeconds(); };
+    // changing either fade changes the other, so the fade out and fade in always match
+    chart1.onFadeChanged = [this] { chart2.setFadeSeconds(chart1.getFadeSeconds()); };
+    chart2.onFadeChanged = [this] { chart1.setFadeSeconds(chart2.getFadeSeconds()); };
     addAndMakeVisible(chart1);
     addAndMakeVisible(chart2);
 
@@ -76,6 +82,7 @@ void TransitionsPage::showPickSong(SongChartComponent& chart)
     {
         chart.setSongName(s.title);
         chart.setSongDuration(s.durationSeconds);
+        chart.setSongFile(s.filePath);
         // A new song means the loaded preset no longer applies
         loadedTransitionIndex = -1;
         loadedTransitionName  = {};

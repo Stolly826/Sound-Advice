@@ -95,6 +95,16 @@ void SoundAdviceLookAndFeel::drawButtonText (juce::Graphics& g,
         return;
     }
 
+    if (shape == "pause")
+    {
+        auto b = button.getLocalBounds().toFloat().reduced(10.0f);
+        const float barW = b.getWidth() * 0.35f;
+        g.setColour(juce::Colours::white);
+        g.fillRect(b.withWidth(barW));
+        g.fillRect(b.withLeft(b.getRight() - barW));
+        return;
+    }
+
     if (shape == "record")
     {
         auto b = button.getLocalBounds().toFloat().reduced(10.0f);

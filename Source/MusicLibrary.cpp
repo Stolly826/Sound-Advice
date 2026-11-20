@@ -210,6 +210,68 @@ bool MusicLibrary::saveSongSettings (const std::map<juce::String, SongSettings>&
     return getSettingsFile().replaceWithText (juce::JSON::toString (juce::var (list)));
 }
 
+juce::File MusicLibrary::getMixesFile() const { return libraryFolder.getChildFile ("mixes.json"); }
+
+juce::String MusicLibrary::getMixKey (const Song& from, const Song& to) const
+{
+    // songs without a file fall back to their title so demo songs still remember their mix
+    auto keyFor = [this] (const Song& s)
+    {
+        const auto key = getSettingsKey (s);
+        return key.isNotEmpty() ? key : "title:" + s.title;
+    };
+    return keyFor (from) + " -> " + keyFor (to);
+}
+
+std::map<juce::String, Transition> MusicLibrary::loadMixMarkers() const
+{
+    std::map<juce::String, Transition> mixes;
+
+    // missing or broken file just means no pair has markers yet
+    const auto parsed = juce::JSON::parse (getMixesFile());
+    if (auto* list = parsed.getArray())
+    {
+        for (const auto& item : *list)
+        {
+            const auto key = item["pair"].toString();
+            if (key.isEmpty())
+                continue;
+
+            auto read = [&item] (const char* name) { return (float) (double) item.getProperty (name, -1.0); };
+            Transition t;
+            t.loopPoint    = read ("loopPoint");
+            t.fadeOutStart = read ("fadeOutStart");
+            t.fadeOutEnd   = read ("fadeOutEnd");
+            t.startPoint   = read ("startPoint");
+            t.fadeInStart  = read ("fadeInStart");
+            t.fadeInEnd    = read ("fadeInEnd");
+            mixes[key] = t;
+        }
+    }
+
+    return mixes;
+}
+
+bool MusicLibrary::saveMixMarkers (const std::map<juce::String, Transition>& mixes) const
+{
+    juce::Array<juce::var> list;
+    for (const auto& [key, t] : mixes)
+    {
+        auto* obj = new juce::DynamicObject();
+        obj->setProperty ("pair",         key);
+        obj->setProperty ("loopPoint",    t.loopPoint);
+        obj->setProperty ("fadeOutStart", t.fadeOutStart);
+        obj->setProperty ("fadeOutEnd",   t.fadeOutEnd);
+        obj->setProperty ("startPoint",   t.startPoint);
+        obj->setProperty ("fadeInStart",  t.fadeInStart);
+        obj->setProperty ("fadeInEnd",    t.fadeInEnd);
+        list.add (juce::var (obj));
+    }
+
+    libraryFolder.createDirectory();
+    return getMixesFile().replaceWithText (juce::JSON::toString (juce::var (list)));
+}
+
 bool MusicLibrary::copyWithStreams (const juce::File& from, const juce::File& to)
 {
     // binary so windows doesnt mess with line ending bytes
