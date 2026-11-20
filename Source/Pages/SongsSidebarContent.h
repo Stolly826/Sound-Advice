@@ -12,17 +12,22 @@ public:
     // Fired with the index of the clicked item (same order as the main list).
     std::function<void(int)> onItemClicked;
 
+    // when on items can be dragged out drop targets get "library:<index>"
+    void setDragEnabled(bool shouldDrag) { dragEnabled = shouldDrag; }
+
     void updateSongs(const juce::Array<Song>& songs);
     void paint(juce::Graphics& g) override;
     void mouseMove(const juce::MouseEvent& e) override;
     void mouseExit(const juce::MouseEvent& e) override;
     void mouseUp(const juce::MouseEvent& e) override;
     void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
+    void mouseDrag(const juce::MouseEvent& e) override;
 
 private:
     juce::Array<Song> items;
     int hoveredIndex = -1;
     int firstVisibleIndex = 0;
+    bool dragEnabled = false;
 
     static constexpr int   kItemHeight = 38;
 

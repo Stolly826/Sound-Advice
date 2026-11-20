@@ -2,6 +2,7 @@
 
 static constexpr int kSidebarWidth = 220;
 static constexpr int kMiniPlayerHeight = 64;
+static constexpr int kSaveDelayMs  = 500;
 
 namespace
 {
@@ -92,8 +93,8 @@ MainComponent::MainComponent()
         else if (audioEngine.isPaused())
             audioEngine.resume();
         else
-            playSong(currentSong);
-        timerCallback();
+            playSong(currentSong, mixingPage.getSongSettings(currentSong));
+        updateMiniPlayer();
     };
 
     modelPathStorageFile = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
@@ -107,6 +108,13 @@ MainComponent::MainComponent()
 
     playlistDetailPage.onSongClicked = [this](Playlist* p, int idx) { showMixingPage(p, idx); };
     playlistDetailPage.getAllSongs   = [this]() { return songsPage.getSongs(); };
+    // order changes and added songs get saved
+    playlistDetailPage.onPlaylistChanged = [this] { playlistsPage.playlistChanged(); };
+    playlistDetailPage.addSongToLibrary  = [this](Song& s) { return songsPage.addSongToLibrary(s); };
+    playlistDetailPage.onEditClicked     = [this](Playlist* p)
+    {
+        playlistsPage.showEditDialog(p, &playlistDetailPage, [this] { playlistDetailPage.refreshHeader(); });
+    };
     transitionsPage.getAllSongs           = [this]()                              { return songsPage.getSongs(); };
     transitionsPage.getTransitionsForPair = [this](juce::String s1, juce::String s2) { return songsPage.getTransitionsForPair(s1, s2); };
     transitionsPage.addTransitionToSong   = [this](juce::String s1, Transition t)    { songsPage.addTransitionToSong(s1, t); };
@@ -116,9 +124,19 @@ MainComponent::MainComponent()
 
     // FRONTEND/BACKEND INTEGRATION: Connect the Mixing page controls to JUCE vibe coded 
 
-    mixingPage.onPlaySong = [this](const Song& song)
+    mixingPage.onPlaySong = [this](const Song& song, const SongSettings& settings,
+                                   float fadeInStart, float fadeInEnd,
+                                   float fadeOutStart, float fadeOutEnd)
         {
-            return playSong(song);
+            return playSong(song, settings, fadeInStart, fadeInEnd, fadeOutStart, fadeOutEnd);
+        };
+
+    //start the next song quietly under the fade out, sounding how its sliders were set
+    mixingPage.onCueNext = [this](const Song& song, float fadeInStart, float fadeInEnd)
+        {
+            return song.filePath.isNotEmpty()
+                && audioEngine.cueNext(juce::File(song.filePath), fadeInStart, fadeInEnd,
+                                       mixingPage.getSongSettings(song));
         };
 
     //pause the song without losing its current position
@@ -130,37 +148,98 @@ MainComponent::MainComponent()
     //stop the song and reset its playback position
     mixingPage.onStop = [this] { audioEngine.stop(); };
 
-    //changes JUCE volume with the slider
-    mixingPage.onVolumeChanged = [this](float gain)
+    //each song remembers its own speed, volume, gain and eq
+    songSettings = songsPage.getLibrary().loadSongSettings();
+
+    mixingPage.getSongSettings = [this](const Song& song)
         {
-            audioEngine.setVolume(gain);
-        };
-    mixingPage.onSpeedChanged = [this](double speed)
-        {
-            audioEngine.setPlaybackSpeed(speed);
-        };
-    mixingPage.onBassChanged = [this](float db)
-        {
-            audioEngine.setBass(db);
+            const auto found = songSettings.find(songsPage.getLibrary().getSettingsKey(song));
+            return found != songSettings.end() ? found->second : SongSettings{};
         };
 
-    mixingPage.onMidsChanged = [this](float db)
+    //changes are heard straight away, the file gets written once the sliders settle
+    //the next song's sliders go to the incoming deck so they're heard while it fades in
+    mixingPage.onSongSettingsChanged = [this](const Song& song, const SongSettings& settings,
+                                              bool isNextSong)
         {
-            audioEngine.setMids(db);
+            if (isNextSong)
+                audioEngine.applyIncomingSettings(settings);
+            else
+                audioEngine.applySettings(settings);
+
+            const auto key = songsPage.getLibrary().getSettingsKey(song);
+            if (key.isNotEmpty())
+            {
+                songSettings[key] = settings;
+                startTimer(kSaveDelayMs);
+            }
         };
 
-    mixingPage.onTrebleChanged = [this](float db)
+    //fades, loop and start markers come back when you return to a pair of songs, even after a restart
+    mixMarkers = songsPage.getLibrary().loadMixMarkers();
+
+    mixingPage.getMixMarkers = [this](const Song& from, const Song& to)
         {
-            audioEngine.setTreble(db);
+            const auto found = mixMarkers.find(songsPage.getLibrary().getMixKey(from, to));
+            return found != mixMarkers.end() ? found->second : Transition{};
         };
 
-    mixingPage.onScratch = [this](double offsetSeconds)
+    mixingPage.onMixMarkersChanged = [this](const Song& from, const Song& to, const Transition& t)
         {
-            audioEngine.scratch(offsetSeconds);
+            mixMarkers[songsPage.getLibrary().getMixKey(from, to)] = t;
+            if (! songsPage.getLibrary().saveMixMarkers(mixMarkers))
+            {
+                DBG("couldnt save mix markers to " + songsPage.getLibrary().getMixesFile().getFullPathName());
+            }
         };
 
-    //starting volume is set at 75%
-    audioEngine.setVolume(0.75f);
+    //a removed songs file can be reused by the next upload so its settings and mixes go with it
+    songsPage.onSongRemoved = [this](const Song& song)
+        {
+            const auto key = songsPage.getLibrary().getSettingsKey(song);
+            if (songSettings.erase(key) > 0)
+                songsPage.getLibrary().saveSongSettings(songSettings);
+
+            const auto before = mixMarkers.size();
+            const auto ownKey = key.isNotEmpty() ? key : "title:" + song.title;
+            for (auto it = mixMarkers.begin(); it != mixMarkers.end();)
+            {
+                if (it->first.startsWith(ownKey + " -> ") || it->first.endsWith(" -> " + ownKey))
+                    it = mixMarkers.erase(it);
+                else
+                    ++it;
+            }
+            if (mixMarkers.size() != before)
+                songsPage.getLibrary().saveMixMarkers(mixMarkers);
+        };
+
+    // FRONTEND/BACKEND INTEGRATION: fill in the add song dialog from the files own tags
+    auto readSongDetails = [this](const juce::File& file)
+        {
+            const auto info = SongData::readDetails(audioEngine.getFormats(), file);
+
+            Song s;
+            s.title           = info.title;
+            s.artist          = info.artist;
+            s.album           = info.album;
+            s.durationSeconds = juce::roundToInt(info.lengthSeconds);
+            return s;
+        };
+    songsPage.readSongDetails          = readSongDetails;
+    playlistDetailPage.readSongDetails = readSongDetails;
+
+    //scratching: grab the record, move it, let go
+    mixingPage.onScratchStart = [this] { audioEngine.beginScratch(); };
+    mixingPage.onScratchMove  = [this](double offsetSeconds) { audioEngine.scratchTo(offsetSeconds); };
+    mixingPage.onScratchEnd   = [this] { audioEngine.endScratch(); };
+
+    // playhead jump to and skip read from the same engine
+    mixingPage.getPlaybackPosition = [this] { return audioEngine.getPosition(); };
+    mixingPage.getPlaybackLength   = [this] { return audioEngine.getLength(); };
+    mixingPage.isPlaybackActive    = [this] { return audioEngine.isPlaying(); };
+    mixingPage.isPlaybackPaused    = [this] { return audioEngine.isPaused(); };
+    mixingPage.getLoadedFilePath   = [this] { return audioEngine.getLoadedFilePath(); };
+    mixingPage.onSeek              = [this](double seconds) { audioEngine.setPosition(seconds); };
 
     songsPage.getPlaylistsForSong = [this](const Song& s)
     {
@@ -181,27 +260,45 @@ MainComponent::MainComponent()
     showPage(mainMenuPage);
 
     setSize(1000, 700);
-    startTimerHz(4);
+    miniPlayerTimer.onTick = [this] { updateMiniPlayer(); };
+    miniPlayerTimer.startTimerHz(4);
 }
 
 MainComponent::~MainComponent()
 {
-    stopTimer();
+    miniPlayerTimer.stopTimer();
+
+    if (isTimerRunning())
+        timerCallback(); //dont lose a slider change made right before closing
+
     sidebar.setPageContent(nullptr);
     setLookAndFeel(nullptr);
 }
 
-bool MainComponent::playSong(const Song& song)
+void MainComponent::timerCallback()
 {
+    stopTimer();
+
+    if (! songsPage.getLibrary().saveSongSettings(songSettings))
+        DBG("couldnt save song settings to " + songsPage.getLibrary().getSettingsFile().getFullPathName());
+}
+
+bool MainComponent::playSong(const Song& song, const SongSettings& settings,
+                             float fadeInStart, float fadeInEnd,
+                             float fadeOutStart, float fadeOutEnd)
+{
+    //only play songs with the right files attached mp3 and wav
     if (song.filePath.isEmpty())
         return false;
 
-    if (!audioEngine.playSong(juce::File(song.filePath)))
+    audioEngine.applySettings(settings);
+    if (!audioEngine.playSong(juce::File(song.filePath),
+                              fadeInStart, fadeInEnd, fadeOutStart, fadeOutEnd))
         return false;
 
     currentSong = song;
     hasCurrentSong = true;
-    timerCallback();
+    updateMiniPlayer();
     return true;
 }
 
@@ -271,10 +368,10 @@ void MainComponent::startTranscription(
         new TranscriptionJob(song, modelFile, std::move(completion)), true);
 }
 
-void MainComponent::timerCallback()
+void MainComponent::updateMiniPlayer()
 {
-    const double duration = audioEngine.getLengthInSeconds();
-    const double position = audioEngine.getCurrentPosition();
+    const double duration = audioEngine.getLength();
+    const double position = audioEngine.getPosition();
     const bool ready = hasCurrentSong && audioEngine.hasLoadedSong();
 
     miniTrackLabel.setText(ready

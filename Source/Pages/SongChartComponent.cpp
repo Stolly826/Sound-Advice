@@ -4,17 +4,20 @@
 namespace {
     struct WaveSpec {
         juce::Colour colour;
-        float        freq;
-        float        amp;
-        float        phase;
         const char*  label;
     };
 
+    enum Wave { pitchWave, bpmWave, volumeWave };
     const WaveSpec kWaves[3] = {
-        { juce::Colour(0xff4c9be8), 4.2f, 1.00f, 0.0f, "Pitch"  },
-        { juce::Colour(0xff4ecb71), 6.1f, 0.65f, 1.3f, "BPM"    },
-        { juce::Colour(0xffe8a14c), 2.7f, 0.80f, 2.5f, "Volume" },
+        { juce::Colour(0xff4c9be8), "Pitch"  },
+        { juce::Colour(0xff4ecb71), "BPM"    },
+        { juce::Colour(0xffe8a14c), "Volume" },
     };
+
+    // how far the bpm line can move from the song's tempo before it hits the edge
+    static constexpr float kBpmSpread    = 12.0f;
+    // volume is drawn from this quiet level (bottom) up to full scale (top)
+    static constexpr float kQuietestDb   = -48.0f;
 
     static constexpr int kBPad  = 8;   // inner padding
     static constexpr int kNameH = 18;  // song name strip
@@ -64,6 +67,23 @@ void SongChartComponent::OverlayButton::paintButton(juce::Graphics& g,
         head.closeSubPath();
         g.fillPath(head);
     }
+    else if (shape == Shape::Previous)
+    {
+        // mirror of skip: triangle pointing LEFT with the bar on its right
+        float cy   = b.getCentreY();
+        float barW = 2.2f;
+        float barH = b.getHeight() * 0.62f;
+        float barX = b.getRight() - barW;
+        g.fillRect(barX, cy - barH * 0.5f, barW, barH);
+
+        float triRight = barX - 1.5f;
+        juce::Path tri;
+        tri.startNewSubPath(triRight,               cy - barH * 0.5f);
+        tri.lineTo         (triRight,               cy + barH * 0.5f);
+        tri.lineTo         (triRight - barH * 0.6f, cy);
+        tri.closeSubPath();
+        g.fillPath(tri);
+    }
     else // Skip
     {
         // Filled right-pointing triangle + vertical bar
@@ -88,13 +108,22 @@ void SongChartComponent::OverlayButton::paintButton(juce::Graphics& g,
 // ── Construction ──────────────────────────────────────────────────────────────
 SongChartComponent::SongChartComponent()
 {
-    loopReturnButton.onClick = [] { /* TODO: return to loop point */ };
-    skipButton.onClick       = [] { /* TODO: skip to next song */ };
+    // loop return jumps to the loop marker if one is set
+    loopReturnButton.onClick = [this] { if (loopPoint >= 0.0f && onJumpTo) onJumpTo(loopPoint); };
+    skipButton.onClick       = [this] { if (onSkip) onSkip(); };
+    previousButton.onClick   = [this] { if (onPrevious) onPrevious(); };
+    previousButton.setTooltip("Previous song");
+    skipButton.setTooltip("Next song");
+    loopReturnButton.setTooltip("Back to the loop marker");
+    addAndMakeVisible(previousButton);
     addAndMakeVisible(loopReturnButton);
     addAndMakeVisible(skipButton);
 
     selectSongButton.onClick = [this] { if (onSelectSong) onSelectSong(); };
     addAndMakeVisible(selectSongButton);
+
+    changeSongButton.onClick = [this] { if (onSelectSong) onSelectSong(); };
+    addChildComponent(changeSongButton); // shown by setSongName
 }
 
 // ── Public setters ─────────────────────────────────────────────────────────────
@@ -107,13 +136,94 @@ void SongChartComponent::setSongName(const juce::String& name)
     }
     songName = name;
     selectSongButton.setVisible(name.isEmpty());
+    changeSongButton.setVisible(name.isNotEmpty() && onSelectSong != nullptr);
     repaint();
+}
+
+void SongChartComponent::setSongFile(const juce::String& path)
+{
+    if (path == songFile && graphState != GraphState::failed)
+        return;
+
+    songFile = path;
+    analysis.reset();
+
+    if (path.isEmpty() || !juce::File(path).existsAsFile())
+    {
+        graphState = path.isEmpty() ? GraphState::noFile : GraphState::failed;
+        repaint();
+        return;
+    }
+
+    graphState = GraphState::loading;
+    repaint();
+
+    juce::Component::SafePointer<SongChartComponent> safeThis(this);
+    SongAnalyser::Service::getInstance()->request(path,
+        [safeThis, path](std::shared_ptr<const SongAnalysis> result)
+        {
+            // the chart may have moved on to another song while this one was being read
+            if (safeThis == nullptr || safeThis->songFile != path)
+                return;
+
+            safeThis->analysis   = result;
+            safeThis->graphState = result != nullptr ? GraphState::ready : GraphState::failed;
+            safeThis->repaint();
+        });
+}
+
+double SongChartComponent::getFadeSeconds() const
+{
+    if (fadeStart < 0.0f || fadeEnd <= fadeStart || durationSeconds <= 0)
+        return 0.0;
+    return (double)(fadeEnd - fadeStart) * durationSeconds;
+}
+
+void SongChartComponent::setFadeSeconds(double seconds)
+{
+    if (seconds <= 0.0 || durationSeconds <= 0)
+        return;
+
+    const float length = (float)(seconds / durationSeconds);
+    if (fadeStart >= 0.0f)
+        fadeEnd = juce::jmin(1.0f, fadeStart + length);
+    else if (fadeEnd >= 0.0f)
+        fadeStart = juce::jmax(0.0f, fadeEnd - length);
+    else
+        return; // no fade placed here yet, it will match when the user places one
+
+    repaint();
+}
+
+void SongChartComponent::completeFade(bool placedStart)
+{
+    // already a sensible fade, leave the user's other marker alone
+    if (fadeStart >= 0.0f && fadeEnd > fadeStart)
+        return;
+
+    // match the other song's fade so the two line up, otherwise a few seconds
+    double seconds = getPartnerFadeSeconds ? getPartnerFadeSeconds() : 0.0;
+    if (seconds <= 0.0)
+        seconds = kDefaultFadeSeconds;
+
+    const float length = durationSeconds > 0 ? (float)(seconds / durationSeconds) : 0.05f;
+
+    if (placedStart)
+        fadeEnd = juce::jmin(1.0f, fadeStart + length);
+    else
+        fadeStart = juce::jmax(0.0f, fadeEnd - length);
 }
 
 void SongChartComponent::setSongDuration(int seconds)
 {
     durationSeconds = seconds;
     repaint();
+}
+
+void SongChartComponent::setPlayhead(float position)
+{
+    // only repaint when it moved
+    if (! juce::exactlyEqual(position, playhead)) { playhead = position; repaint(); }
 }
 
 void SongChartComponent::setIsNextSong(bool isNext)
@@ -158,6 +268,11 @@ void SongChartComponent::resized()
 
     skipButton      .setBounds(right - btnSize,              btnY, btnSize, btnSize);
     loopReturnButton.setBounds(right - btnSize * 2 - gap,    btnY, btnSize, btnSize);
+    previousButton  .setBounds(right - btnSize * 3 - gap * 2, btnY, btnSize, btnSize);
+    previousButton  .setVisible(onPrevious != nullptr); // only the mixing page's first chart has one
+
+    constexpr int selectW = 48;
+    changeSongButton.setBounds(right - btnSize * 3 - gap * 4 - selectW, btnY - 1, selectW, btnSize + 2);
 
     // "Select Song" centred in the chart data area
     auto ca = getChartArea();
@@ -165,32 +280,69 @@ void SongChartComponent::resized()
 }
 
 // ── Wave helpers ──────────────────────────────────────────────────────────────
-float SongChartComponent::waveValueAt(int i, float t) const
+bool SongChartComponent::waveValueAt(int i, float t, float& out) const
 {
-    return kWaves[i].amp
-         * std::sin(t * juce::MathConstants<float>::twoPi * kWaves[i].freq
-                    + kWaves[i].phase);
-}
+    if (graphState != GraphState::ready || analysis == nullptr)
+        return false;
 
-juce::String SongChartComponent::formatValue(int i, float rawValue) const
-{
-    // Normalise to [-1, 1] then map to a human-readable unit
-    const float norm = rawValue / juce::jmax(kWaves[i].amp, 0.001f);
+    const int n   = SongAnalysis::kPoints;
+    const int idx = juce::jlimit(0, n - 1, (int)(t * (float)n));
+
     switch (i)
     {
-        case 0: // Pitch → semitones
+        case pitchWave:
         {
-            const float st = norm * 12.0f;
-            return (st >= 0.0f ? "+" : "") + juce::String(st, 1) + " st";
+            const float note = analysis->pitchNote[(size_t)idx];
+            const float range = analysis->highNote - analysis->lowNote;
+            if (note <= 0.0f || range <= 0.0f) return false;
+            out = (note - analysis->lowNote) / range * 2.0f - 1.0f;
+            break;
         }
-        case 1: // BPM
-            return juce::String(juce::roundToInt(128.0f + norm * 20.0f)) + " bpm";
-        case 2: // Volume
-            return juce::String(
-                       juce::jlimit(0, 100, juce::roundToInt(50.0f + norm * 50.0f)))
-                   + "%";
+        case bpmWave:
+        {
+            const float bpm = analysis->bpm[(size_t)idx];
+            if (bpm <= 0.0f || analysis->songBpm <= 0.0f) return false;
+            out = (bpm - analysis->songBpm) / kBpmSpread;
+            break;
+        }
+        case volumeWave:
+            out = (analysis->volumeDb[(size_t)idx] - kQuietestDb) / -kQuietestDb * 2.0f - 1.0f;
+            break;
+        default:
+            return false;
     }
-    return {};
+
+    out = juce::jlimit(-1.0f, 1.0f, out);
+    return true;
+}
+
+juce::String SongChartComponent::formatValue(int i, float t) const
+{
+    if (graphState != GraphState::ready || analysis == nullptr)
+        return "--";
+
+    const int idx = juce::jlimit(0, SongAnalysis::kPoints - 1, (int)(t * (float)SongAnalysis::kPoints));
+    switch (i)
+    {
+        case pitchWave:
+        {
+            const float note = analysis->pitchNote[(size_t)idx];
+            return note > 0.0f ? juce::MidiMessage::getMidiNoteName(juce::roundToInt(note), true, true, 4)
+                               : juce::String("--");
+        }
+        case bpmWave:
+        {
+            const float bpm = analysis->bpm[(size_t)idx];
+            return bpm > 0.0f ? juce::String(juce::roundToInt(bpm)) + " bpm" : juce::String("--");
+        }
+        case volumeWave:
+        {
+            const float db = analysis->volumeDb[(size_t)idx];
+            return db > -99.0f ? juce::String(db, 1) + " dB" : juce::String("silent");
+        }
+        default:
+            return {};
+    }
 }
 
 // ── Mouse ─────────────────────────────────────────────────────────────────────
@@ -207,8 +359,9 @@ void SongChartComponent::mouseExit(const juce::MouseEvent&)
 
 void SongChartComponent::mouseDown(const juce::MouseEvent& e)
 {
-    if (!isEditable) return;
     if (!getChartArea().contains(e.x, e.y)) return;
+    // jump to stays available after a preset locks the markers
+    if (!isEditable && isNextSong) return;
 
     const auto  ca = getChartArea();
     const float t  = juce::jlimit(0.0f, 1.0f,
@@ -225,9 +378,9 @@ void SongChartComponent::mouseDown(const juce::MouseEvent& e)
     else
     {
         menu.addItem(1, "Jump To");
-        menu.addItem(2, "Set Loop");
-        menu.addItem(3, "Start Fade Out");
-        menu.addItem(4, "End Fade Out");
+        menu.addItem(2, "Set Loop",       isEditable);
+        menu.addItem(3, "Start Fade Out", isEditable);
+        menu.addItem(4, "End Fade Out",   isEditable);
     }
 
     menu.showMenuAsync(
@@ -237,13 +390,25 @@ void SongChartComponent::mouseDown(const juce::MouseEvent& e)
         {
             switch (result)
             {
-                case 1: if (isNextSong) startPoint = t; break;
+                case 1:
+                    if (isNextSong) startPoint = t;
+                    else if (onJumpTo) onJumpTo(t); // start playing from here
+                    break;
                 case 2: loopPoint = t; break;
-                case 3: fadeStart = t; break;
-                case 4: fadeEnd   = t; break;
+                // placing one end of a fade puts the other end in for you if it is missing
+                case 3: fadeStart = t; completeFade(true);  break;
+                case 4: fadeEnd   = t; completeFade(false); break;
                 default: return;
             }
             repaint();
+
+            // the other song's fade follows so the fade out and fade in always last as long
+            if ((result == 3 || result == 4) && onFadeChanged)
+                onFadeChanged();
+
+            // jump to on the first chart is playback, not a marker
+            if ((result != 1 || isNextSong) && onMarkersChanged)
+                onMarkersChanged();
         });
 }
 
@@ -297,19 +462,37 @@ void SongChartComponent::paint(juce::Graphics& g)
     g.drawHorizontalLine((int)midY, cx, cx + cw);
 
     // ── Waveforms ─────────────────────────────────────────────────────────
-    for (int wi = 0; wi < 3; ++wi)
+    if (graphState == GraphState::ready)
     {
-        juce::Path path;
-        for (int i = 0; i <= 200; ++i)
+        // one point per analysed slice, with a gap wherever a line has no reading
+        for (int wi = 0; wi < 3; ++wi)
         {
-            const float t = (float)i / 200.0f;
-            const float x = cx + t * cw;
-            const float y = midY - ampH * waveValueAt(wi, t);
-            if (i == 0) path.startNewSubPath(x, y);
-            else        path.lineTo(x, y);
+            juce::Path path;
+            bool drawing = false;
+            for (int i = 0; i < SongAnalysis::kPoints; ++i)
+            {
+                const float t = ((float)i + 0.5f) / (float)SongAnalysis::kPoints;
+                float value = 0.0f;
+                if (!waveValueAt(wi, t, value)) { drawing = false; continue; }
+
+                const float x = cx + t * cw;
+                const float y = midY - ampH * value;
+                if (drawing) path.lineTo(x, y);
+                else         path.startNewSubPath(x, y);
+                drawing = true;
+            }
+            g.setColour(kWaves[wi].colour.withAlpha(0.9f));
+            g.strokePath(path, juce::PathStrokeType(1.5f));
         }
-        g.setColour(kWaves[wi].colour.withAlpha(0.9f));
-        g.strokePath(path, juce::PathStrokeType(1.5f));
+    }
+    else
+    {
+        const char* message = graphState == GraphState::loading ? "Analysing song..."
+                            : graphState == GraphState::failed  ? "Couldn't read this song's audio file"
+                                                                : "No audio file for this song";
+        g.setColour(juce::Colours::white.withAlpha(0.4f));
+        g.setFont(juce::FontOptions(12.0f));
+        g.drawText(message, ca, juce::Justification::centred);
     }
 
     // ── Set-point markers ─────────────────────────────────────────────────
@@ -326,6 +509,14 @@ void SongChartComponent::paint(juce::Graphics& g)
     drawMarker(fadeStart,  juce::Colour(0xffFF8C00)); // orange — fade start
     drawMarker(fadeEnd,    juce::Colour(0xffFF4444)); // red   — fade end
 
+    // playhead
+    if (playhead >= 0.0f)
+    {
+        const float px = cx + playhead * cw;
+        g.setColour(juce::Colours::white);
+        g.fillRect(px - 1.0f, cy, 2.0f, ch);
+    }
+
     // ── Hover vertical line + wave dots ───────────────────────────────────
     if (hoverX >= 0)
     {
@@ -336,7 +527,9 @@ void SongChartComponent::paint(juce::Graphics& g)
 
         for (int wi = 0; wi < 3; ++wi)
         {
-            const float dotY = midY - ampH * waveValueAt(wi, t);
+            float value = 0.0f;
+            if (!waveValueAt(wi, t, value)) continue;
+            const float dotY = midY - ampH * value;
             g.setColour(kWaves[wi].colour);
             g.fillEllipse((float)hoverX - 4.0f, dotY - 4.0f, 8.0f, 8.0f);
         }
@@ -345,7 +538,7 @@ void SongChartComponent::paint(juce::Graphics& g)
     g.restoreState(); // end chart clip
 
     // ── Hover value callout (drawn outside clip so it can overlap name) ───
-    if (hoverX >= 0)
+    if (hoverX >= 0 && graphState == GraphState::ready)
     {
         const float t    = juce::jlimit(0.0f, 1.0f, ((float)hoverX - cx) / cw);
         const int   boxW = 122;
@@ -363,9 +556,8 @@ void SongChartComponent::paint(juce::Graphics& g)
         g.setFont(juce::FontOptions(11.0f));
         for (int wi = 0; wi < 3; ++wi)
         {
-            const float      val  = waveValueAt(wi, t);
             const juce::String txt = juce::String(kWaves[wi].label) + ":  "
-                                   + formatValue(wi, val);
+                                   + formatValue(wi, t);
             const int rowY = boxY + 5 + wi * 18;
 
             g.setColour(kWaves[wi].colour.withAlpha(0.9f));
@@ -404,7 +596,9 @@ void SongChartComponent::paint(juce::Graphics& g)
         }
         else
         {
-            timeStr = "0:00 / " + total;
+            // show playback time when theres a playhead
+            const int nowSecs = playhead >= 0.0f ? juce::roundToInt(playhead * (float)durationSeconds) : 0;
+            timeStr = fmtTime(nowSecs) + " / " + total;
         }
 
         g.setColour(juce::Colours::white.withAlpha(0.45f));
