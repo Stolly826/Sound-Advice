@@ -11,12 +11,17 @@ public:
     std::function<void()> onClicked;
     std::function<void()> onDeleteClicked;
 
+    // set to make the row draggable eg playlist reordering
+    // this is what the drop target receives
+    juce::var dragDescription;
+
     explicit SongRow(const Song& data);
     void update(const Song& data);
 
     void paint(juce::Graphics& g) override;
     void resized() override;
     void mouseUp(const juce::MouseEvent& e) override;
+    void mouseDrag(const juce::MouseEvent& e) override;
     void mouseEnter(const juce::MouseEvent& e) override;
     void mouseExit(const juce::MouseEvent& e) override;
 

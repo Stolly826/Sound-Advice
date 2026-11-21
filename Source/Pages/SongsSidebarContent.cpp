@@ -78,6 +78,9 @@ void SongsSidebarContent::mouseExit(const juce::MouseEvent&)
 
 void SongsSidebarContent::mouseUp(const juce::MouseEvent& e)
 {
+    // a drag isnt a click
+    if (e.mouseWasDraggedSinceMouseDown()) return;
+
     const int idx = getItemIndexAt(e.getPosition());
     if (idx >= 0 && onItemClicked)
         onItemClicked(idx);
@@ -85,10 +88,31 @@ void SongsSidebarContent::mouseUp(const juce::MouseEvent& e)
 
 void SongsSidebarContent::mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
 {
+    if (wheel.deltaY == 0.0f) return; // sideways scroll, nothing to do
+
     const int maxFirstIndex = juce::jmax(0, items.size() - visibleCount());
     const int steps = juce::jmax(1, juce::roundToInt(juce::jmax(wheel.deltaY, -wheel.deltaY) * 3.0f));
     const int direction = wheel.deltaY > 0.0f ? -1 : 1;
     firstVisibleIndex = juce::jlimit(0, maxFirstIndex,
         firstVisibleIndex + direction * steps);
     repaint();
+}
+
+void SongsSidebarContent::mouseDrag(const juce::MouseEvent& e)
+{
+    if (! dragEnabled || e.getDistanceFromDragStart() < 6) return;
+
+    // item where the press started
+    const int idx = getItemIndexAt(e.getMouseDownPosition());
+    if (idx < 0) return;
+
+    auto* container = juce::DragAndDropContainer::findParentDragContainerFor(this);
+    if (container == nullptr || container->isDragAndDropActive()) return;
+
+    // picture of just that item follows the mouse
+    const int  rowY     = (idx - firstVisibleIndex) * (kItemHeight + 4); // scrolled position
+    const auto itemArea = juce::Rectangle<int>(4, rowY, getWidth() - 8, kItemHeight);
+    const auto offset   = itemArea.getPosition() - e.getMouseDownPosition();
+    container->startDragging("library:" + juce::String(idx), this,
+                             juce::ScaledImage(createComponentSnapshot(itemArea)), false, &offset);
 }

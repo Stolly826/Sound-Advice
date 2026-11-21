@@ -8,6 +8,9 @@ class AddSongDialog : public juce::Component
 public:
     std::function<void(Song)> onCreated;
 
+    // Reads the title, artist, album and duration from the chosen audio file.
+    std::function<Song(const juce::File&)> readSongDetails;
+
     AddSongDialog();
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -30,9 +33,11 @@ private:
     juce::TextButton cancelButton { "Cancel" };
 
     juce::File                         selectedFile;
+    int                                selectedDuration = 0;
     std::unique_ptr<juce::FileChooser> fileChooser;
 
     void onChooseFile();
+    void onFileChosen(const juce::File& file);
     void onAddClicked();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AddSongDialog)

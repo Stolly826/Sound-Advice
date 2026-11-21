@@ -4,6 +4,7 @@
 #include "SoundAdviceLookAndFeel.h"
 #include "AudioEngine.h"
 #include "LocalTranscriber.h"
+#include "SongData.h"
 #include "Sidebar.h"
 #include "Pages/MainMenuPage.h"
 #include "Pages/PlaylistsPage.h"
@@ -17,7 +18,8 @@
 // Exactly one page is visible at a time; showPage() handles switching
 // and shows/hides the sidebar accordingly.
 class MainComponent : public juce::Component,
-                      private juce::Timer
+                      public juce::DragAndDropContainer, // lets songs be dragged between parts of the window
+                      private juce::Timer                // saves song settings once the sliders settle
 {
 public:
     MainComponent();
@@ -39,19 +41,39 @@ private:
     TransitionsPage    transitionsPage;
     MixingPage         mixingPage;
 
+    //every songs speed, volume, gain and eq, kept in settings.json
+    std::map<juce::String, SongSettings> songSettings;
+
+    //markers last placed on the mixing page for each pair of songs, kept in mixes.json
+    std::map<juce::String, Transition> mixMarkers;
+
+    // mini player along the bottom of the window
     juce::Label miniTrackLabel;
     juce::TextButton miniPlaybackButton { "Play" };
     juce::Slider miniProgressSlider;
     juce::Label miniTimeLabel;
-    juce::File modelPathStorageFile;
-    std::shared_ptr<juce::FileChooser> modelChooser;
     Song currentSong;
     bool hasCurrentSong = false;
+
+    // the mini player refreshes on its own timer, the inherited Timer is the settings save
+    struct MiniPlayerTimer : public juce::Timer
+    {
+        std::function<void()> onTick;
+        void timerCallback() override { if (onTick) onTick(); }
+    };
+    MiniPlayerTimer miniPlayerTimer;
+
+    // local whisper transcription
+    juce::File modelPathStorageFile;
+    std::shared_ptr<juce::FileChooser> modelChooser;
 
     void showPage(juce::Component& page);
     void showPlaylistDetail(Playlist* playlist);
     void showMixingPage(Playlist* playlist, int songIndex);
-    bool playSong(const Song& song);
+    bool playSong(const Song& song, const SongSettings& settings,
+                  float fadeInStart = -1.0f, float fadeInEnd = -1.0f,
+                  float fadeOutStart = -1.0f, float fadeOutEnd = -1.0f);
+    void updateMiniPlayer();
     void requestTranscription(const Song& song,
                               std::function<void(juce::Result, juce::String)> completion);
     void startTranscription(const Song& song,

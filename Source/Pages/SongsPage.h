@@ -5,6 +5,7 @@
 #include "SongRow.h"
 #include "NewPlaylistRow.h"
 #include "SongsSidebarContent.h"
+#include "../MusicLibrary.h"
 
 // Global song library. Every song the user has ever added lives here.
 // Clicking a row opens a detail popup (name, artist, album, year,
@@ -18,11 +19,19 @@ public:
     std::function<void(const Song&, std::function<void(juce::Result, juce::String)>)>
         onTranscribeSong;
 
+    // FRONTEND/BACKEND INTEGRATION: Set by MainComponent.
+    std::function<Song(const juce::File&)> readSongDetails; // tags for the add song dialog
+    std::function<void(const Song&)>       onSongRemoved;   // so its settings can go too
+
     SongsPage();
     void paint(juce::Graphics& g) override;
     void resized() override;
 
     const juce::Array<Song>& getSongs() const { return songs; }
+
+    // copy the file in add to the library and save
+    // song is updated to point at the stored copy false if it failed
+    bool addSongToLibrary(Song& s);
 
     juce::Array<Transition> getTransitionsForPair(const juce::String& s1,
                                                    const juce::String& s2) const;
@@ -32,7 +41,10 @@ public:
 
     juce::Component& getSidebarContent() { return sidebarContent; }
 
+    MusicLibrary& getLibrary() { return library; }
+
 private:
+    MusicLibrary                  library; // saves songs to disk
     juce::Array<Song>             songs;
 
     juce::Label                   titleLabel;
@@ -44,6 +56,7 @@ private:
     SongsSidebarContent sidebarContent;
 
     void rebuildList();
+    void saveLibrary();
     void handleAddSong(Song s);
     void handleDeleteRequest(int index);
     void showAddSongDialog();

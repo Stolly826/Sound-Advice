@@ -33,7 +33,7 @@ FetchContent_MakeAvailable(taglib)
 add_executable(SoundAdviceMock
     SoundAdviceMock.cpp
     SoundAdviceMock.h
-    SongData.h
+    ../Source/SongData.h
 )
 
 #setting config rules for C++ code to be compatible w JUCE (looked this up)
@@ -45,8 +45,10 @@ target_compile_definitions(SoundAdviceMock PRIVATE
     TAGLIB_STATIC
 )
 
+#SongData.h lives in the main app now so this build and the app share one copy
 #TagLib only exports its include folders when installed so we point at them directly
 target_include_directories(SoundAdviceMock PRIVATE
+    ../Source
     ${taglib_SOURCE_DIR}/taglib
     ${taglib_SOURCE_DIR}/taglib/toolkit
 )
