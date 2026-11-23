@@ -235,6 +235,7 @@ MainComponent::MainComponent()
             s.artist          = info.artist;
             s.album           = info.album;
             s.durationSeconds = juce::roundToInt(info.lengthSeconds);
+            s.bpm             = info.bpm; // from the files BPM tag, 0 if it has none
             return s;
         };
     songsPage.readSongDetails          = readSongDetails;
@@ -281,6 +282,12 @@ MainComponent::MainComponent()
     {
         requestTranscription(song, std::move(completion));
     };
+    songsPage.onSongBpmChanged = [this](const Song& song)
+    {
+        playlistsPage.updateSongBpm(song);
+        playlistDetailPage.refreshSongs();
+    };
+
     songsPage.onSongTranscriptChanged = [this](const Song& song)
     {
         playlistsPage.updateSongTranscript(song);

@@ -416,6 +416,7 @@ juce::var MusicLibrary::songToVar (const Song& s) const
     obj->setProperty ("releaseYear",     s.releaseYear);
     obj->setProperty ("dateAdded",       s.dateAdded.toMilliseconds());
     obj->setProperty ("durationSeconds", s.durationSeconds);
+    obj->setProperty ("bpm",             s.bpm);
 
     // files in our songs folder are saved by name only
     // so the library still works if the folder moves eg windows -> mac
@@ -505,6 +506,7 @@ Song MusicLibrary::varToSong (const juce::var& v) const
     s.releaseYear     = (int) v["releaseYear"];
     s.dateAdded       = juce::Time ((juce::int64) v["dateAdded"]);
     s.durationSeconds = (int) v["durationSeconds"];
+    s.bpm             = (double) v.getProperty ("bpm", 0.0);
 
     // name only -> inside songs folder  full path -> use as is
     const auto file = v["file"].toString();

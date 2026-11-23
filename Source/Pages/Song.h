@@ -2,6 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "Transition.h"
+#include <cmath>
 
 inline const juce::StringArray& getExplicitWordList()
 {
@@ -21,6 +22,7 @@ struct Song
     int          releaseYear     = 0; // 0 = unknown
     juce::Time              dateAdded;
     int                     durationSeconds = 0; // 0 = unknown
+    double                  bpm = 0.0;           // 0 = unknown
     juce::Array<Transition> transitions;
     juce::Image             image;     // isNull() when the song has no picture
     juce::File              imageFile; // copy of the picture in the library images folder
@@ -72,6 +74,21 @@ inline juce::String formatSongDuration(int secs)
 {
     if (secs <= 0) return "--:--";
     return juce::String(secs / 60) + ":" + juce::String(secs % 60).paddedLeft('0', 2);
+}
+
+// whole numbers show without a decimal, 0 shows as blank
+inline juce::String formatSongBpm(double bpm)
+{
+    if (bpm <= 0.0) return {};
+    const auto rounded = std::round(bpm * 10.0) / 10.0;
+    return rounded == std::floor(rounded) ? juce::String((int) rounded) : juce::String(rounded, 1);
+}
+
+// anything that isnt a sensible tempo counts as unknown
+inline double parseSongBpm(const juce::String& s)
+{
+    const auto bpm = s.trim().getDoubleValue();
+    return (bpm > 0.0 && bpm < 1000.0) ? bpm : 0.0;
 }
 
 inline int parseSongDuration(const juce::String& s)

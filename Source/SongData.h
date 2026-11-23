@@ -6,6 +6,7 @@
 #include <fileref.h>
 #include <tag.h>
 #include <tpropertymap.h>
+#include "SongAnalysis.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -97,40 +98,10 @@ namespace SongData
         return juce::String::fromUTF8(s.toCString(true));
     }
 
-    //guesses the tempo by looking for the most regular spacing between volume spikes (beats)
+    //guesses the tempo from the spacing between volume spikes (beats), same detector the charts use
     inline double estimateBpm(const std::vector<float>& onsets, double framesPerSecond)
     {
-        const double minBpm = 70.0, maxBpm = 180.0;
-        size_t minLag = (size_t)std::floor(framesPerSecond * 60.0 / maxBpm);
-        size_t maxLag = (size_t)std::ceil(framesPerSecond * 60.0 / minBpm);
-
-        if (minLag < 1 || onsets.size() < maxLag * 4)
-            return 0.0; //song too short to say anything useful
-
-        //autocorrelation: how well does the onset pattern line up with itself shifted by "lag" frames
-        std::vector<double> scores(maxLag + 2, 0.0);
-        for (size_t lag = minLag - 1; lag <= maxLag + 1; ++lag)
-        {
-            double sum = 0.0;
-            for (size_t i = 0; i + lag < onsets.size(); ++i)
-                sum += onsets[i] * onsets[i + lag];
-            scores[lag] = sum / (double)(onsets.size() - lag);
-        }
-
-        size_t best = minLag;
-        for (size_t lag = minLag; lag <= maxLag; ++lag)
-            if (scores[lag] > scores[best])
-                best = lag;
-
-        if (scores[best] <= 0.0)
-            return 0.0;
-
-        //parabolic interpolation so we arent stuck to whole frame lags
-        double a = scores[best - 1], b = scores[best], c = scores[best + 1];
-        double denom = a - 2.0 * b + c;
-        double offset = denom != 0.0 ? 0.5 * (a - c) / denom : 0.0;
-
-        return 60.0 * framesPerSecond / ((double)best + offset);
+        return SongAnalyser::tempoOf(onsets.data(), onsets.size(), framesPerSecond);
     }
 
     //reads the whole file once with JUCE to get loudness and an onset envelope for bpm

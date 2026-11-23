@@ -73,6 +73,19 @@ SongDetailDialog::SongDetailDialog(const Song& s,
     };
     addAndMakeVisible(transcribeButton);
 
+    bpmEditor.setInputRestrictions(6, "0123456789.");
+    bpmEditor.setTextToShowWhenEmpty("Unknown", juce::Colours::grey);
+    bpmEditor.setText(formatSongBpm(song.bpm), juce::dontSendNotification);
+    bpmEditor.onTextChange = [this]
+    {
+        const auto bpm = parseSongBpm(bpmEditor.getText());
+        if (bpm == song.bpm) return;
+        song.bpm = bpm;
+        if (onBpmChanged) onBpmChanged(song);
+    };
+    bpmEditor.onReturnKey = [this] { unfocusAllComponents(); };
+    addAndMakeVisible(bpmEditor);
+
     explicitWordsLabel.setFont(juce::FontOptions(12.0f));
     explicitWordsLabel.setColour(juce::Label::textColourId,
                                  juce::Colours::white.withAlpha(0.7f));
@@ -138,6 +151,7 @@ void SongDetailDialog::paint(juce::Graphics& g)
     if (song.genre.isNotEmpty())    drawInfoRow("Genre:",    song.genre);
     if (song.releaseYear > 0)       drawInfoRow("Year:",     juce::String(song.releaseYear));
     if (song.durationSeconds > 0)   drawInfoRow("Duration:", formatSongDuration(song.durationSeconds));
+    drawInfoRow("BPM:", {}); // the value is bpmEditor, placed over this row in resized
 
     // ── Separator ──────────────────────────────────────────────────────────
     y += kSepH;
@@ -209,6 +223,10 @@ void SongDetailDialog::paint(juce::Graphics& g)
 
 void SongDetailDialog::resized()
 {
+    // bpm is always the last info row
+    const int bpmRowY = kPad + getHeaderHeight() + (getNumInfoLines() - 1) * kLineH;
+    bpmEditor.setBounds(kPad + 80, bpmRowY, 90, kLineH);
+
     int y = kPad + getHeaderHeight() + getNumInfoLines() * kLineH;
     y += kSepH * 2 + 1;
     y += kHeaderH + juce::jmax(1, playlistNames.size()) * kItemH + kSepH * 2 + 1;
@@ -236,7 +254,8 @@ int SongDetailDialog::getNumInfoLines() const
          + (song.album.isNotEmpty() ? 1 : 0)
          + (song.genre.isNotEmpty() ? 1 : 0)
          + (song.releaseYear > 0 ? 1 : 0)
-         + (song.durationSeconds > 0 ? 1 : 0);
+         + (song.durationSeconds > 0 ? 1 : 0)
+         + 1; // bpm, always shown so it can be filled in
 }
 
 void SongDetailDialog::updateTranscriptDetails()
