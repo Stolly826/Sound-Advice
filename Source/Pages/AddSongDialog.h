@@ -8,7 +8,7 @@ class AddSongDialog : public juce::Component
 public:
     std::function<void(Song)> onCreated;
 
-    // Reads the title, artist, album and duration from the chosen audio file.
+    // Reads the title, artist, album, duration and tagged bpm from the chosen audio file.
     std::function<Song(const juce::File&)> readSongDetails;
 
     AddSongDialog();
@@ -16,7 +16,7 @@ public:
     void resized() override;
 
     static constexpr int kWidth  = 420;
-    static constexpr int kHeight = 560;
+    static constexpr int kHeight = 614;
 
 private:
     juce::TextButton chooseFileButton { "Choose Audio File" };
@@ -30,6 +30,8 @@ private:
     juce::TextEditor albumEditor;
     juce::Label      genreLabel  { {}, "Genre" };
     juce::TextEditor genreEditor;
+    juce::Label      bpmLabel    { {}, "BPM" };
+    juce::TextEditor bpmEditor;
 
     juce::TextButton imageButton { "Choose Image" };
     juce::Label      imageFilename;

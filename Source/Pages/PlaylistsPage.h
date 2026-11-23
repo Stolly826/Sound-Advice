@@ -24,6 +24,8 @@ public:
     // Returns the names of all playlists that contain a song matching by title+artist.
     juce::StringArray getPlaylistNamesContaining(const Song& song) const;
     void updateSongTranscript(const Song& song);
+    // copies the songs bpm into every playlist that has it, then saves
+    void updateSongBpm(const Song& song);
 
     // a duplicate upload replaced oldSong in the library
     // every playlist entry for oldSong becomes newSong in the same spot, then saves

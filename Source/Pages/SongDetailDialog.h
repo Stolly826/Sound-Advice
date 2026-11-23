@@ -15,6 +15,8 @@ public:
     std::function<void(const Song&, std::function<void(juce::Result, juce::String)>)>
         onTranscribeRequested;
     std::function<void(const Song&)> onSongUpdated;
+    // the user typed a new bpm, saved as they type
+    std::function<void(const Song&)> onBpmChanged;
 
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -33,12 +35,13 @@ private:
     juce::TextButton  closeButton { "Close" };
     juce::TextButton  transcribeButton { "Transcribe audio" };
     juce::Label       explicitWordsLabel;
+    juce::TextEditor  bpmEditor;
     juce::TextEditor  transcriptEditor;
 
     static constexpr int kImageSize = 96;
 
     int getHeaderHeight() const;  // title row or picture with the title beside it
-    int getNumInfoLines() const;  // artist album genre year duration that are filled in
+    int getNumInfoLines() const;  // artist album genre year duration that are filled in, plus bpm
     void updateTranscriptDetails();
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SongDetailDialog)
 };

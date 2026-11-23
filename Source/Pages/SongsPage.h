@@ -19,6 +19,7 @@ public:
     // Set by MainComponent so the detail dialog can query playlist membership.
     std::function<juce::StringArray(const Song&)> getPlaylistsForSong;
     std::function<void(const Song&)> onSongTranscriptChanged;
+    std::function<void(const Song&)> onSongBpmChanged;
     std::function<void(const Song&, std::function<void(juce::Result, juce::String)>)>
         onTranscribeSong;
 
@@ -45,6 +46,8 @@ public:
     void addTransitionToSong    (const juce::String& s1Title, const Transition& t);
     void updateTransitionInSong (const juce::String& s1Title, int idx, const Transition& t);
     void updateSongTranscript(const Song& song);
+    // sets the bpm on the matching library song, saves and re-sorts
+    void updateSongBpm(const Song& song);
 
     juce::Component& getSidebarContent() { return sidebarContent; }
 

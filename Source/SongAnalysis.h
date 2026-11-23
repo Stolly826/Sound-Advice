@@ -27,35 +27,112 @@ struct SongAnalysis
 
 namespace SongAnalyser
 {
-    // tempo from how regularly the volume spikes (beats) repeat, same idea as SongData::estimateBpm
+    // tempo from how regularly the volume spikes (beats) repeat, SongData::estimateBpm uses this too
+    // 1. blur the spikes a little, a beat every 34.45 frames would otherwise be split between
+    //    lags 34 and 35 and lose to every second beat at a near whole 69 frames (half tempo)
+    // 2. autocorrelation: how well the pattern lines up with itself shifted by each lag
+    // 3. a steady beat also lines up at 2x, 3x and 4x its lag, so if a quarter, third or half of
+    //    the winning lag scores nearly as well the winner was a group of beats, not one
+    // 4. the search goes down to 35 bpm because some songs (eg a guitar that strums every other
+    //    beat) repeat most strongly every 2 beats, a winner below 70 bpm is halved back into range
     inline float tempoOf(const float* onsets, size_t count, double framesPerSecond)
     {
         const double minBpm = 70.0, maxBpm = 180.0;
         const auto minLag = (size_t)std::floor(framesPerSecond * 60.0 / maxBpm);
         const auto maxLag = (size_t)std::ceil(framesPerSecond * 60.0 / minBpm);
-        if (minLag < 2 || count < maxLag * 3)
+        const auto searchLag = maxLag * 2; // 35 bpm
+        if (minLag < 4 || count < searchLag * 3)
             return 0.0f;
 
-        std::vector<double> scores(maxLag + 2, 0.0);
-        for (size_t lag = minLag - 1; lag <= maxLag + 1; ++lag)
+        // gaussian blur, sigma 1 frame, then remove the average so only the beats line up
+        constexpr int radius = 3;
+        float kernel[2 * radius + 1];
+        float kernelSum = 0.0f;
+        for (int k = -radius; k <= radius; ++k)
+            kernelSum += kernel[k + radius] = std::exp(-0.5f * (float)(k * k));
+
+        std::vector<float> smooth(count, 0.0f);
+        double mean = 0.0;
+        for (size_t i = 0; i < count; ++i)
+        {
+            float sum = 0.0f;
+            for (int k = -radius; k <= radius; ++k)
+            {
+                const auto j = (long)i + k;
+                if (j >= 0 && j < (long)count)
+                    sum += kernel[k + radius] * onsets[(size_t)j];
+            }
+            smooth[i] = sum / kernelSum;
+            mean += smooth[i];
+        }
+        mean /= (double)count;
+        for (auto& v : smooth)
+            v -= (float)mean;
+
+        std::vector<double> scores(searchLag + 2, 0.0);
+        for (size_t lag = minLag - 1; lag <= searchLag + 1; ++lag)
         {
             double sum = 0.0;
             for (size_t i = 0; i + lag < count; ++i)
-                sum += onsets[i] * onsets[i + lag];
+                sum += (double)smooth[i] * smooth[i + lag];
             scores[lag] = sum / (double)(count - lag);
         }
 
-        size_t best = minLag;
-        for (size_t lag = minLag; lag <= maxLag; ++lag)
-            if (scores[lag] > scores[best])
-                best = lag;
+        // highest peak (bigger than both neighbours) between from and to
+        auto bestPeak = [&scores](size_t from, size_t to)
+        {
+            size_t best = 0;
+            for (size_t lag = from; lag <= to; ++lag)
+                if (scores[lag] > scores[lag - 1] && scores[lag] >= scores[lag + 1]
+                    && (best == 0 || scores[lag] > scores[best]))
+                    best = lag;
+            return best;
+        };
 
+        size_t best = bestPeak(minLag, searchLag);
+        if (best == 0) // no clear peak, fall back to the highest score
+        {
+            best = minLag;
+            for (size_t lag = minLag; lag <= searchLag; ++lag)
+                if (scores[lag] > scores[best])
+                    best = lag;
+        }
         if (scores[best] <= 0.0)
             return 0.0f;
 
+        // peak closest to lag / parts, 0 if there isnt one
+        auto peakNear = [&](size_t lag, size_t parts)
+        {
+            const size_t centre = (lag + parts / 2) / parts;
+            return centre < 2 ? 0 : bestPeak(std::max(minLag, centre - 1), std::min(searchLag, centre + 1));
+        };
+
+        // shortest lag that still lines up nearly as well, checking the smallest piece first
+        for (bool shorter = true; shorter;)
+        {
+            shorter = false;
+            for (size_t parts : { 4, 3, 2 })
+            {
+                const size_t piece = peakNear(best, parts);
+                if (piece != 0 && scores[piece] >= 0.8 * scores[best])
+                {
+                    best = piece;
+                    shorter = true;
+                    break;
+                }
+            }
+        }
+
+        // still slower than 70 bpm, that was every 2 beats
+        while (best > maxLag)
+        {
+            const size_t half = peakNear(best, 2);
+            best = half != 0 ? half : best / 2;
+        }
+
         const double a = scores[best - 1], b = scores[best], c = scores[best + 1];
         const double denom = a - 2.0 * b + c;
-        const double offset = denom != 0.0 ? 0.5 * (a - c) / denom : 0.0;
+        const double offset = denom != 0.0 ? juce::jlimit(-0.5, 0.5, 0.5 * (a - c) / denom) : 0.0;
         return (float)(60.0 * framesPerSecond / ((double)best + offset));
     }
 

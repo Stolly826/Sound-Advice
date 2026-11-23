@@ -252,6 +252,21 @@ void PlaylistsPage::updateSongTranscript(const Song& updatedSong)
         rebuildList();
 }
 
+void PlaylistsPage::updateSongBpm(const Song& updatedSong)
+{
+    bool anyChanged = false;
+    for (auto* playlist : playlists)
+        for (auto& song : playlist->songs)
+            if (songsHaveSameIdentity(song, updatedSong) && song.bpm != updatedSong.bpm)
+            {
+                song.bpm = updatedSong.bpm;
+                anyChanged = true;
+            }
+
+    if (anyChanged)
+        savePlaylists();
+}
+
 void PlaylistsPage::replaceSong(const Song& oldSong, const Song& newSong)
 {
     bool anyChanged = false;

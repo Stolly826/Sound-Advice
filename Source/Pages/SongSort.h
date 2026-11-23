@@ -7,7 +7,7 @@
 
 // how a song list is shown
 // custom is the order the songs are stored in, the user changes it by dragging rows
-enum class SongSortMode { custom, title, artist, genre, newest, oldest };
+enum class SongSortMode { custom, title, artist, genre, newest, oldest, bpmSlowest, bpmFastest };
 
 // saved to json as these words so the file stays readable
 inline juce::String songSortModeToId(SongSortMode mode)
@@ -19,6 +19,8 @@ inline juce::String songSortModeToId(SongSortMode mode)
         case SongSortMode::genre:  return "genre";
         case SongSortMode::newest: return "newest";
         case SongSortMode::oldest: return "oldest";
+        case SongSortMode::bpmSlowest: return "bpmSlowest";
+        case SongSortMode::bpmFastest: return "bpmFastest";
         case SongSortMode::custom: break;
     }
     return "custom";
@@ -27,7 +29,8 @@ inline juce::String songSortModeToId(SongSortMode mode)
 inline SongSortMode songSortModeFromId(const juce::String& id)
 {
     for (auto mode : { SongSortMode::title, SongSortMode::artist, SongSortMode::genre,
-                       SongSortMode::newest, SongSortMode::oldest })
+                       SongSortMode::newest, SongSortMode::oldest,
+                       SongSortMode::bpmSlowest, SongSortMode::bpmFastest })
         if (id == songSortModeToId(mode))
             return mode;
 
@@ -44,6 +47,8 @@ inline void fillSongSortBox(juce::ComboBox& box)
     box.addItem("Genre (A-Z)",  (int) SongSortMode::genre  + 1);
     box.addItem("Newest first", (int) SongSortMode::newest + 1);
     box.addItem("Oldest first", (int) SongSortMode::oldest + 1);
+    box.addItem("BPM (slowest first)", (int) SongSortMode::bpmSlowest + 1);
+    box.addItem("BPM (fastest first)", (int) SongSortMode::bpmFastest + 1);
 }
 
 inline void selectSongSortMode(juce::ComboBox& box, SongSortMode mode)
@@ -53,11 +58,12 @@ inline void selectSongSortMode(juce::ComboBox& box, SongSortMode mode)
 
 inline SongSortMode getSelectedSongSortMode(const juce::ComboBox& box)
 {
-    return (SongSortMode) juce::jlimit(0, (int) SongSortMode::oldest, box.getSelectedId() - 1);
+    return (SongSortMode) juce::jlimit(0, (int) SongSortMode::bpmFastest, box.getSelectedId() - 1);
 }
 
 // indexes into songs in the order they should be shown
 // alphabetical sorts ignore case and put songs with that field blank at the end
+// bpm sorts put songs with no bpm at the end either way
 // ties keep their custom order
 inline juce::Array<int> getSortedSongOrder(const juce::Array<Song>& songs, SongSortMode mode)
 {
@@ -96,6 +102,20 @@ inline juce::Array<int> getSortedSongOrder(const juce::Array<Song>& songs, SongS
             std::stable_sort(order.begin(), order.end(), [&songs](int a, int b)
                 { return songs.getReference(a).dateAdded < songs.getReference(b).dateAdded; });
             break;
+        case SongSortMode::bpmSlowest:
+        case SongSortMode::bpmFastest:
+        {
+            const bool slowestFirst = mode == SongSortMode::bpmSlowest;
+            std::stable_sort(order.begin(), order.end(), [&songs, slowestFirst](int a, int b)
+            {
+                const auto x = songs.getReference(a).bpm;
+                const auto y = songs.getReference(b).bpm;
+                if ((x > 0.0) != (y > 0.0))
+                    return x > 0.0; // unknown last
+                return slowestFirst ? x < y : x > y;
+            });
+            break;
+        }
         case SongSortMode::custom:
             break;
     }

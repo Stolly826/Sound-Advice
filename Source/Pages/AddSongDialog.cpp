@@ -1,4 +1,5 @@
 #include "AddSongDialog.h"
+#include "../SongAnalysis.h"
 
 static constexpr int kPad   = 20;
 static constexpr int kLineH = 22;
@@ -19,10 +20,13 @@ AddSongDialog::AddSongDialog()
     imageButton.onClick = [this] { onChooseImage(); };
     addAndMakeVisible(imageButton);
 
-    for (auto* l : { &titleLabel, &artistLabel, &albumLabel, &genreLabel })
+    for (auto* l : { &titleLabel, &artistLabel, &albumLabel, &genreLabel, &bpmLabel })
         addAndMakeVisible(l);
 
-    for (auto* e : { &titleEditor, &artistEditor, &albumEditor, &genreEditor })
+    bpmEditor.setInputRestrictions(6, "0123456789.");
+    bpmEditor.setTextToShowWhenEmpty("Detected from the file, or type it in", juce::Colours::grey);
+
+    for (auto* e : { &titleEditor, &artistEditor, &albumEditor, &genreEditor, &bpmEditor })
     {
         e->setReturnKeyStartsNewLine(false);
         addAndMakeVisible(e);
@@ -100,6 +104,7 @@ void AddSongDialog::resized()
     field(artistLabel, artistEditor);
     field(albumLabel,  albumEditor);
     field(genreLabel,  genreEditor);
+    field(bpmLabel,    bpmEditor);
 
     area.removeFromTop(4);
     auto btnRow = area.removeFromTop(36);
@@ -170,6 +175,28 @@ void AddSongDialog::onFileChosen(const juce::File& file)
         artistEditor.setText(details.artist);
         albumEditor.setText(details.album);
         selectedDuration = details.durationSeconds;
+        bpmEditor.setText(formatSongBpm(details.bpm));
+    }
+
+    // no bpm tag so work it out from the audio, takes about a second so it runs in the background
+    if (bpmEditor.isEmpty())
+    {
+        bpmEditor.setTextToShowWhenEmpty("Detecting...", juce::Colours::grey);
+        juce::Component::SafePointer<AddSongDialog> safeThis(this);
+        SongAnalyser::Service::getInstance()->request(file.getFullPathName(),
+            [safeThis, file](std::shared_ptr<const SongAnalysis> result)
+            {
+                // dialog closed or a different file was picked meanwhile
+                if (safeThis == nullptr || safeThis->selectedFile != file)
+                    return;
+
+                safeThis->bpmEditor.setTextToShowWhenEmpty("Detected from the file, or type it in",
+                                                           juce::Colours::grey);
+                // dont overwrite something the user typed while waiting
+                if (result != nullptr && safeThis->bpmEditor.isEmpty())
+                    safeThis->bpmEditor.setText(formatSongBpm(result->songBpm));
+                safeThis->bpmEditor.repaint();
+            });
     }
 
     // TODO: analyse key and energy for transition recommendations
@@ -195,6 +222,7 @@ void AddSongDialog::onAddClicked()
     s.filePath = selectedFile.existsAsFile() ? selectedFile.getFullPathName() : juce::String{}; //saves file full location jasen edit
     s.dateAdded = juce::Time::getCurrentTime();
     s.durationSeconds = selectedDuration;
+    s.bpm       = parseSongBpm(bpmEditor.getText());
 
     if (onCreated) onCreated(std::move(s));
 

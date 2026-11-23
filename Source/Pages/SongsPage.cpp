@@ -418,6 +418,27 @@ void SongsPage::updateSongTranscript(const Song& updatedSong)
         onSongTranscriptChanged(updatedSong);
 }
 
+void SongsPage::updateSongBpm(const Song& updatedSong)
+{
+    bool changed = false;
+    for (auto& song : songs)
+    {
+        if (songsHaveSameIdentity(song, updatedSong) && song.bpm != updatedSong.bpm)
+        {
+            song.bpm = updatedSong.bpm;
+            changed = true;
+        }
+    }
+
+    if (! changed) return;
+
+    saveLibrary();
+    rebuildList(); // a bpm sort may move it
+
+    if (onSongBpmChanged)
+        onSongBpmChanged(updatedSong);
+}
+
 void SongsPage::showSongDetail(int index)
 {
     if (index < 0 || index >= songs.size()) return;
@@ -430,6 +451,7 @@ void SongsPage::showSongDetail(int index)
     {
         updateSongTranscript(updatedSong);
     };
+    content->onBpmChanged = [this](const Song& updatedSong) { updateSongBpm(updatedSong); };
     content->onTranscribeRequested = [this](
         const Song& song,
         std::function<void(juce::Result, juce::String)> completion)
